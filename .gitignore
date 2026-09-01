@@ -1,0 +1,33 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, coverage, and type-checking caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
+# Trained model artifacts
+client/data-entry/models/*
+!client/data-entry/models/.gitkeep
