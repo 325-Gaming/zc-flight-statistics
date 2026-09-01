@@ -28,6 +28,11 @@ dist/
 .idea/
 .vscode/
 
+# Local secrets
+.env
+.env.*
+!.env.example
+
 # Trained model artifacts
 client/data-entry/models/*
 !client/data-entry/models/.gitkeep

@@ -1,0 +1,7 @@
+httpx[http2]
+keyboard
+mss
+numpy
+Pillow
+python-dotenv
+tensorflow
