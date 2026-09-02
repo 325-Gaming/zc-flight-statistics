@@ -1,0 +1,239 @@
+import hashlib
+import json
+import os
+import pathlib
+import tempfile
+from dataclasses import dataclass
+from typing import Dict, Mapping, Optional, Tuple
+from urllib.parse import urljoin
+
+import httpx
+
+
+MANIFEST_SCHEMA_VERSION = 1
+DEFAULT_MODEL_FILES = {
+    "image_type": "image_type.keras",
+    "gacha10": "gacha10.keras",
+}
+
+
+@dataclass(frozen=True)
+class ModelUpdateResult:
+    name: str
+    version: str
+    status: str
+
+
+def _version_key(version: str) -> Tuple[int, ...]:
+    """将 2026.09.02.1 形式的版本转换成可比较的数字元组。"""
+    if not isinstance(version, str) or not version:
+        raise ValueError("模型版本不能为空")
+    parts = version.split(".")
+    if any(not part.isdigit() for part in parts):
+        raise ValueError(f"不支持的模型版本格式: {version}")
+    return tuple(int(part) for part in parts)
+
+
+def _sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_local_manifest(path: pathlib.Path) -> dict:
+    try:
+        with path.open("r", encoding="utf-8") as manifest_file:
+            manifest = json.load(manifest_file)
+        if manifest.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+            return {"schema_version": MANIFEST_SCHEMA_VERSION, "models": {}}
+        if not isinstance(manifest.get("models"), dict):
+            return {"schema_version": MANIFEST_SCHEMA_VERSION, "models": {}}
+        return manifest
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {"schema_version": MANIFEST_SCHEMA_VERSION, "models": {}}
+
+
+def _write_local_manifest(path: pathlib.Path, manifest: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix="manifest-", suffix=".json", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as manifest_file:
+            json.dump(manifest, manifest_file, ensure_ascii=False, indent=2)
+            manifest_file.write("\n")
+            manifest_file.flush()
+            os.fsync(manifest_file.fileno())
+        os.replace(temp_name, path)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _validate_remote_manifest(manifest: dict) -> Mapping[str, dict]:
+    if manifest.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+        raise ValueError("服务器返回了不支持的模型清单版本")
+    models = manifest.get("models")
+    if not isinstance(models, dict):
+        raise ValueError("服务器模型清单缺少 models")
+    return models
+
+
+def _download_and_replace(
+    client: httpx.Client,
+    download_url: str,
+    destination: pathlib.Path,
+    expected_sha256: str,
+    expected_size: int,
+    headers: Mapping[str, str],
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f"{destination.name}-", suffix=".download", dir=destination.parent
+    )
+    digest = hashlib.sha256()
+    downloaded_size = 0
+    try:
+        with os.fdopen(fd, "wb") as output_file:
+            with client.stream("GET", download_url, headers=headers) as response:
+                response.raise_for_status()
+                for chunk in response.iter_bytes(1024 * 1024):
+                    output_file.write(chunk)
+                    digest.update(chunk)
+                    downloaded_size += len(chunk)
+            output_file.flush()
+            os.fsync(output_file.fileno())
+
+        if downloaded_size != expected_size:
+            raise ValueError(
+                f"模型 {destination.name} 大小不符: "
+                f"期望 {expected_size}，实际 {downloaded_size}"
+            )
+        actual_sha256 = digest.hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise ValueError(f"模型 {destination.name} SHA-256 校验失败")
+        os.replace(temp_name, destination)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def update_models(
+    manifest_url: str,
+    models_dir: pathlib.Path,
+    client_version: str,
+    login_token: Optional[str] = None,
+    model_files: Mapping[str, str] = DEFAULT_MODEL_FILES,
+    client: Optional[httpx.Client] = None,
+) -> Dict[str, ModelUpdateResult]:
+    """从服务器清单检查并更新模型，成功后返回每个模型的处理结果。"""
+    models_dir = pathlib.Path(models_dir)
+    local_manifest_path = models_dir / "manifest.json"
+    local_manifest = _load_local_manifest(local_manifest_path)
+    headers = {"Authorization": f"Bearer {login_token}"} if login_token else {}
+    owns_client = client is None
+    http_client = client or httpx.Client(http2=True, timeout=httpx.Timeout(30, read=300))
+
+    try:
+        response = http_client.get(manifest_url, headers=headers)
+        response.raise_for_status()
+        remote_models = _validate_remote_manifest(response.json())
+        results: Dict[str, ModelUpdateResult] = {}
+
+        for name, filename in model_files.items():
+            remote = remote_models.get(name)
+            if not isinstance(remote, dict):
+                raise ValueError(f"服务器模型清单缺少 {name}")
+
+            version = remote.get("version")
+            sha256 = remote.get("sha256")
+            size = remote.get("size")
+            download_url = remote.get("url")
+            min_client_version = remote.get("min_client_version", "0")
+            _version_key(version)
+            if not isinstance(sha256, str) or len(sha256) != 64:
+                raise ValueError(f"模型 {name} 的 SHA-256 无效")
+            if not isinstance(size, int) or size < 0:
+                raise ValueError(f"模型 {name} 的文件大小无效")
+            if not isinstance(download_url, str) or not download_url:
+                raise ValueError(f"模型 {name} 缺少下载地址")
+            if _version_key(client_version) < _version_key(min_client_version):
+                raise RuntimeError(
+                    f"模型 {name} {version} 要求客户端至少为 {min_client_version}，"
+                    f"当前为 {client_version}"
+                )
+
+            destination = models_dir / filename
+            local = local_manifest["models"].get(name, {})
+            local_version = local.get("version")
+            actual_sha256 = _sha256(destination) if destination.is_file() else None
+            should_download = actual_sha256 != sha256
+
+            if local_version:
+                local_key = _version_key(local_version)
+                remote_key = _version_key(version)
+                if remote_key < local_key:
+                    results[name] = ModelUpdateResult(name, local_version, "kept-newer-local")
+                    continue
+
+            if should_download:
+                _download_and_replace(
+                    http_client,
+                    urljoin(manifest_url, download_url),
+                    destination,
+                    sha256,
+                    size,
+                    headers,
+                )
+                status = "downloaded"
+            else:
+                status = "current"
+
+            local_manifest["models"][name] = {
+                "version": version,
+                "sha256": sha256,
+                "size": size,
+            }
+            results[name] = ModelUpdateResult(name, version, status)
+
+        _write_local_manifest(local_manifest_path, local_manifest)
+        return results
+    finally:
+        if owns_client:
+            http_client.close()
+
+
+def ensure_latest_models(
+    manifest_url: str,
+    models_dir: pathlib.Path,
+    client_version: str,
+    login_token: Optional[str] = None,
+    model_files: Mapping[str, str] = DEFAULT_MODEL_FILES,
+) -> Dict[str, ModelUpdateResult]:
+    """更新失败时，仅在全部本地模型仍然存在的情况下允许离线启动。"""
+    try:
+        return update_models(
+            manifest_url,
+            models_dir,
+            client_version,
+            login_token=login_token,
+            model_files=model_files,
+        )
+    except Exception as exc:
+        missing = [
+            name
+            for name, filename in model_files.items()
+            if not (pathlib.Path(models_dir) / filename).is_file()
+        ]
+        if missing:
+            raise RuntimeError(
+                f"无法获取模型，且本地缺少: {', '.join(missing)}"
+            ) from exc
+        print(f"检查模型更新失败，将继续使用本地模型: {exc}")
+        return {}

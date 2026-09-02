@@ -19,6 +19,7 @@ import time
 from PIL import Image
 from dotenv import load_dotenv
 
+from model_updater import ensure_latest_models
 from utils import expand_to_square, process_to_16_9
 
 import tkinter as tk
@@ -26,6 +27,7 @@ from tkinter import ttk
 
 _name = 'Zc航空抽卡统计'
 _version = 'V0.2.0'
+_version_number = _version.lstrip('Vv')
 print('{} {} 启动！'.format(_name, _version))
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -56,6 +58,10 @@ model_image_type_path = BASE_DIR / 'models/image_type.keras'
 model_gacha10_path = BASE_DIR / 'models/gacha10.keras'
 
 submit_gacha_log_api_url = 'https://yubo.run/api/gachalog_zc/submit'
+model_manifest_api_url = os.getenv(
+    'ZCFLIGHT_MODEL_MANIFEST_URL',
+    'https://yubo.run/api/gachalog_zc/models/manifest',
+)
 # submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
 
 zcjpg = 'iVBORw0KGgoAAAANSUhEUgAAABUAAAAUCAIAAADtKeFkAAAEN0lEQVR4nC2TSW/bRgCFZyMpbiIpS7ZpLXZsJ0rdIgHaoAaaBAkQBG0PPRQ99Np/2FOLFggKpLcCadwli1dZsmTLErVxEckhhzOFg373d3gf3oMIISGEruvVanU+n6dpyrmQZcWyyjImSZokaWpYZVXXpiMP5vn+veazz9qLiVeVOEtmRAghy7JhGOPxOMsy+IFSSSZYJImvlkqOXV1bW1+GETf0RRi8fHW0COjuqpNq4PXpnEAIDcMIw5BSCiEEQihE2rDtWw13d6dlmeaKU3HX3dGw//OvL37/e8SFeNMZYMG+++becnRBSqVSURT/hwFQEGzX154/2n+4/2Bzs8EyigSUCdq0cVl5dnTR617PVF13a/b9vbqJHyAIIaVUCCEAQBDev7Pzw/fffv3l052dBkECAAEwKoQAkLQazeePv8AQyowZggwi7OzuoaIosiwDAAjOP9nZfvb4UUTzw+7lcW+8CBlAGlH0uMD/nlz++MtLgaStZp0C+NOrwz/+uUyXISmKol6vM8awEF8/fZJmyZKy6TS8uhhuNZruWs20zLdHx68O/kISGU0m21stO05P+5eHXe+rT7eJZVntdhthrDH20d3bkiJtuA2eZOdnx974KqNhmuWT6ezh5/umbZ10zrrDayfNojSfhFH3fYdgjI0PZFOPURr58/NOr1atzSbjJA7VkhSFoYRRsAzfHJ8kNE1yhomiadrR6bvrTRvFcdLvDxSl5DbqCAgCAWDs4PWf09m01dpst+9uuPVWszmbTKajUdV2BOcFFyzP45T1gwwBAK+uhssoFnlRVjVDLUlQVAytXqvJiLjrN3BWSAC4tapCsG2alCae50lqCbsNghDyfb/b7UpubTqb5ZQqhKzYNsFEkRVdNzVNS8KwrGs3SxEgDsLzszPPGz+5d5dNlzf+0yQ573U1SZwMzB234diOqqs5zXRN8/2A5cyxzJKucoh6/avJZNLtdRzHWt3Z7XgRYYwBCD3PG2iKrcoSltqqipPEn89/e3FANJXzgobBx3t7Jd3wvEmnP/CjZcOxZ4o9bzQJAAAhxDkfjryKaXDGgvm8opXWV1fkEul0zhjn7Tu3s0Kcvj86Ou8NRiPA8XwW9IYeXtWgqupFUQghIBDrK/Ytd2PNMjZWK63mRtWpsGVBcxbQ5XA27vb6R53e2XgqBJIkQjRrfbt94w8AwIpCcB6E0VT3V+xynBUHbw99P0gimiY0LTJ7xaJZPg4ixjnGiAvB4mjaeUcAgAghLAQTBRMgiJeLMCQI9gcX747PMwEAABVTV3Vt5vtBnAAAueBQQFOTHMsgqqokSSIEvzlinkdxMvf9StnYqK6ZRPOjWEBQtspUsOvF4qYngBggWzdsXWOUElnGCKn0hrTgIlrGlyOv1XDLmrzlbGuyPosWndFwmiRhmkIAVVW1DFOFOM9ZIfh/4pV4mHe0FIoAAAAASUVORK5CYII='
@@ -141,6 +147,17 @@ def seperate_image_gacha10(image):
 
 im_w = 128
 im_h = im_w
+
+
+print('正在检查模型更新')
+model_update_results = ensure_latest_models(
+    manifest_url=model_manifest_api_url,
+    models_dir=BASE_DIR / 'models',
+    client_version=_version_number,
+    login_token=login_token,
+)
+for result in model_update_results.values():
+    print(f'模型 {result.name}: {result.version} ({result.status})')
 
 
 # model_image_type = tf.keras.models.load_model(model_image_type_path)
