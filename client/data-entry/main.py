@@ -8,7 +8,6 @@ import datetime
 import httpx
 import io
 import json
-import keyboard
 import mss
 import numpy as np
 import os
@@ -24,6 +23,8 @@ from utils import expand_to_square, process_to_16_9
 
 import tkinter as tk
 from tkinter import ttk
+
+from hotkeys import register_hotkeys
 
 _name = 'Zc航空抽卡统计'
 _version = 'V0.2.0'
@@ -434,14 +435,24 @@ if __name__ == "__main__":
     print('正在启动程序本体')
     app = SimpleApp(event_name, user_name_list)
 
-    keyboard.add_hotkey(hotkey_gacha10, lambda: capture_and_predict())
-    keyboard.add_hotkey(hotkey_3x, lambda: gacha_3x())
-    keyboard.add_hotkey(hotkey_4x, lambda: gacha_4x())
-    keyboard.add_hotkey(hotkey_5x, lambda: gacha_5x())
-    keyboard.add_hotkey(hotkey_6x, lambda: gacha_6x())
-    print('已绑定快捷键： 十连 [{}]'.format(hotkey_gacha10))
-    print('已绑定快捷键： 单抽三星 [{}]'.format(hotkey_3x))
-    print('已绑定快捷键： 单抽四星 [{}]'.format(hotkey_4x))
-    print('已绑定快捷键： 单抽五星 [{}]'.format(hotkey_5x))
-    print('已绑定快捷键： 单抽六星 [{}]'.format(hotkey_6x))
+    try:
+        hotkey_listener = register_hotkeys(
+            {
+                hotkey_gacha10: capture_and_predict,
+                hotkey_3x: gacha_3x,
+                hotkey_4x: gacha_4x,
+                hotkey_5x: gacha_5x,
+                hotkey_6x: gacha_6x,
+            },
+            dispatch=lambda callback: app.root.after(0, callback),
+        )
+    except RuntimeError as error:
+        hotkey_listener = None
+        print(f'警告：{error}。仍可点击窗口中的按钮操作。')
+    else:
+        print('已绑定快捷键： 十连 [{}]'.format(hotkey_gacha10))
+        print('已绑定快捷键： 单抽三星 [{}]'.format(hotkey_3x))
+        print('已绑定快捷键： 单抽四星 [{}]'.format(hotkey_4x))
+        print('已绑定快捷键： 单抽五星 [{}]'.format(hotkey_5x))
+        print('已绑定快捷键： 单抽六星 [{}]'.format(hotkey_6x))
     app.run()
