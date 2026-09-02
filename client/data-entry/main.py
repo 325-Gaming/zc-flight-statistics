@@ -551,8 +551,8 @@ class SimpleApp:
         window = tk.Toplevel(self.root)
         self.settings_window = window
         window.title("设置")
-        window.geometry("780x620")
-        window.minsize(700, 560)
+        window.geometry("780x700")
+        window.minsize(700, 640)
         window.configure(background="#f2f2f2")
         window.transient(self.root)
         window.columnconfigure(0, weight=1)
@@ -569,11 +569,11 @@ class SimpleApp:
                 "乘客名单文件",
                 "程序启动时读取的乘客名单文件，相对于程序目录。",
             ),
-            ("hotkey_gacha10", "十连快捷键", "触发十连截图和识别。"),
-            ("hotkey_3x", "三星快捷键", "提交一次三星单抽记录。"),
-            ("hotkey_4x", "四星快捷键", "提交一次四星单抽记录。"),
-            ("hotkey_5x", "五星快捷键", "提交一次五星单抽记录。"),
-            ("hotkey_6x", "六星快捷键", "提交一次六星单抽记录。"),
+            ("hotkey_gacha10", "十连快捷键", "触发十连截图和识别，可留空。"),
+            ("hotkey_3x", "三星快捷键", "提交一次三星单抽记录，可留空。"),
+            ("hotkey_4x", "四星快捷键", "提交一次四星单抽记录，可留空。"),
+            ("hotkey_5x", "五星快捷键", "提交一次五星单抽记录，可留空。"),
+            ("hotkey_6x", "六星快捷键", "提交一次六星单抽记录，可留空。"),
         )
         content = ttk.Frame(window, padding=18)
         content.grid(row=0, column=0, sticky="nsew")
@@ -608,6 +608,19 @@ class SimpleApp:
                     ),
                 ).grid(row=0, column=2, padx=(6, 0))
                 entries[key] = monitor_selector
+            elif key.startswith("hotkey_"):
+                hotkey_row = ttk.Frame(content)
+                hotkey_row.grid(row=row, column=1, sticky="ew", pady=6)
+                hotkey_row.columnconfigure(0, weight=1)
+                entry = ttk.Entry(hotkey_row)
+                entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+                entry.insert(0, str(current_config.get(key, "")))
+                ttk.Button(
+                    hotkey_row,
+                    text="移除",
+                    command=lambda hotkey_entry=entry: hotkey_entry.delete(0, tk.END),
+                ).grid(row=0, column=1)
+                entries[key] = entry
             else:
                 entry = ttk.Entry(content)
                 entry.grid(row=row, column=1, sticky="ew", pady=6)
@@ -717,11 +730,11 @@ class SimpleApp:
             )
             for key, entry in entries.items()
         }
-        if any(
-            value is None or (isinstance(value, str) and not value)
-            for value in values.values()
-        ):
-            messagebox.showwarning("无法保存", "所有设置项都必须填写。", parent=window)
+        required_keys = ("event_name", "target_monitor_id", "user_name_list_file")
+        if any(values[key] is None or values[key] == "" for key in required_keys):
+            messagebox.showwarning(
+                "无法保存", "活动名称、显示器和乘客名单文件必须填写。", parent=window
+            )
             return
         if not 0 <= values["target_monitor_id"] < len(capture.monitors):
             messagebox.showwarning(
@@ -739,7 +752,8 @@ class SimpleApp:
             "hotkey_6x",
         )
         new_hotkeys = {key: values[key] for key in hotkey_keys}
-        if len(set(new_hotkeys.values())) != len(new_hotkeys):
+        active_hotkeys = [hotkey for hotkey in new_hotkeys.values() if hotkey]
+        if len(set(active_hotkeys)) != len(active_hotkeys):
             messagebox.showwarning("无法保存", "快捷键不能重复。", parent=window)
             return
 
@@ -832,14 +846,25 @@ class SimpleApp:
         window.destroy()
 
     def create_hotkey_listener(self, hotkeys):
+        hotkey_bindings = (
+            (hotkeys["hotkey_gacha10"], capture_and_predict),
+            (hotkeys["hotkey_3x"], gacha_3x),
+            (hotkeys["hotkey_4x"], gacha_4x),
+            (hotkeys["hotkey_5x"], gacha_5x),
+            (hotkeys["hotkey_6x"], gacha_6x),
+        )
+        active_bindings = [
+            (hotkey, callback)
+            for hotkey, callback in hotkey_bindings
+            if hotkey
+        ]
+        active_hotkeys = [hotkey for hotkey, _callback in active_bindings]
+        if len(set(active_hotkeys)) != len(active_hotkeys):
+            raise ValueError("快捷键不能重复")
+        if not active_bindings:
+            return None
         return register_hotkeys(
-            {
-                hotkeys["hotkey_gacha10"]: capture_and_predict,
-                hotkeys["hotkey_3x"]: gacha_3x,
-                hotkeys["hotkey_4x"]: gacha_4x,
-                hotkeys["hotkey_5x"]: gacha_5x,
-                hotkeys["hotkey_6x"]: gacha_6x,
-            },
+            dict(active_bindings),
             dispatch=lambda callback: self.root.after(0, callback),
         )
 
@@ -912,6 +937,7 @@ class SimpleApp:
                 command=command,
                 square=True,
                 shortcut=hotkey,
+                title_font_size=36,
             )
             button.master.grid(row=0, column=column, padx=5)
             setattr(self, f"button_{column + 3}", button)
@@ -933,12 +959,20 @@ class SimpleApp:
             text="十连",
             command=capture_and_predict,
             shortcut=hotkey_gacha10,
+            title_font_size=36,
             width=410,
         )
         self.button_10.master.grid(row=0, column=1, padx=5)
 
     def _create_action_button(
-        self, parent, text, command, square=False, shortcut=None, width=None
+        self,
+        parent,
+        text,
+        command,
+        square=False,
+        shortcut=None,
+        title_font_size=24,
+        width=None,
     ):
         """创建尺寸可控、使用固定浅色配色的自绘按钮。"""
         button_width = 130 if square else (width or 1)
@@ -977,10 +1011,10 @@ class SimpleApp:
             )
             button.create_text(
                 width / 2,
-                height / 2,
+                height * 0.42 if shortcut_value else height / 2,
                 text=text,
                 fill=colors["text"],
-                font=("TkDefaultFont", 12),
+                font=("TkDefaultFont", title_font_size),
                 anchor=tk.CENTER,
             )
             if shortcut_value:
@@ -1161,10 +1195,15 @@ if __name__ == "__main__":
         print(f'警告：{error}。仍可点击窗口中的按钮操作。')
     else:
         app.hotkey_listener = hotkey_listener
-        print('已绑定快捷键： 十连 [{}]'.format(hotkey_gacha10))
-        print('已绑定快捷键： 单抽三星 [{}]'.format(hotkey_3x))
-        print('已绑定快捷键： 单抽四星 [{}]'.format(hotkey_4x))
-        print('已绑定快捷键： 单抽五星 [{}]'.format(hotkey_5x))
-        print('已绑定快捷键： 单抽六星 [{}]'.format(hotkey_6x))
+        configured_hotkeys = (
+            ("十连", hotkey_gacha10),
+            ("单抽三星", hotkey_3x),
+            ("单抽四星", hotkey_4x),
+            ("单抽五星", hotkey_5x),
+            ("单抽六星", hotkey_6x),
+        )
+        for hotkey_name, hotkey in configured_hotkeys:
+            if hotkey:
+                print(f"已绑定快捷键： {hotkey_name} [{hotkey}]")
     signal.signal(signal.SIGINT, lambda signum, frame: app.on_closing())
     app.run()
