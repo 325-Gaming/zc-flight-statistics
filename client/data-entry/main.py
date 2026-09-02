@@ -60,6 +60,10 @@ model_image_type_path = BASE_DIR / 'models/image_type.keras'
 model_gacha10_path = BASE_DIR / 'models/gacha10.keras'
 
 submit_gacha_log_api_url = 'https://yubo.run/api/gachalog_zc/submit'
+set_current_user_api_url = os.getenv(
+    'ZCFLIGHT_CURRENT_USER_URL',
+    'https://yubo.run/api/gachalog_zc/current_user',
+)
 model_manifest_api_url = os.getenv(
     'ZCFLIGHT_MODEL_MANIFEST_URL',
     'https://yubo.run/api/gachalog_zc/models/manifest',
@@ -232,11 +236,13 @@ def pil_to_base64(image, format='PNG'):
 
 def request_submit_gacha_result(event_name, nickname, count, gacha_index, character_list, pil_image):
     t0 = time.time()
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {login_token}",
+        "Content-Type": "application/json",
+    }
     # with requests.Session() as session:
         # res = session.post(submit_gacha_log_api_url, headers=headers, json={
     res = client.post(submit_gacha_log_api_url, headers=headers, json={
-            "login_token": login_token,
             "event_name": event_name,
             "nickname": nickname,
             "count": count,
@@ -245,6 +251,24 @@ def request_submit_gacha_result(event_name, nickname, count, gacha_index, charac
             "image_b64": pil_to_base64(pil_image),
         })
     print('提交结果用时: {:.2f}s，服务器返回: {}'.format(time.time() - t0, res.text))
+
+
+def request_set_current_user(nickname):
+    try:
+        res = client.post(
+            set_current_user_api_url,
+            headers={"Authorization": f"Bearer {login_token}"},
+            json={
+                "nickname": nickname,
+            },
+        )
+        res.raise_for_status()
+    except httpx.HTTPError as error:
+        print(f'更新服务器当前乘客失败: {error}')
+        return False
+
+    print(f'服务器当前乘客已更新为: {nickname}')
+    return True
 
 
 
@@ -347,6 +371,7 @@ class SimpleApp:
         self.gacha_index = 1
         self.hotkey_listener = None
         self.is_closing = False
+        self.last_synced_user = None
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -464,6 +489,8 @@ class SimpleApp:
         ttk.Label(main, text="当前乘客：").grid(row=2, column=0, sticky="w")
         self.entry_nickname = ttk.Entry(main)
         self.entry_nickname.grid(row=3, column=0, sticky="ew", pady=(5, 18))
+        self.entry_nickname.bind("<FocusOut>", self.sync_current_user)
+        self.entry_nickname.bind("<Return>", self.sync_current_user)
 
         single_group = ttk.LabelFrame(main, text="单抽", padding=12)
         single_group.grid(row=4, column=0, sticky="ew", pady=(0, 16))
@@ -623,6 +650,13 @@ class SimpleApp:
         self.button_previous_user.configure(
             state=tk.DISABLED if self.user_id == 0 else tk.NORMAL
         )
+        self.sync_current_user()
+
+    def sync_current_user(self, _event=None):
+        current_user_name = self.entry_nickname.get().strip()
+        if current_user_name and current_user_name != self.last_synced_user:
+            if request_set_current_user(current_user_name):
+                self.last_synced_user = current_user_name
 
     def new_user(self):
         self.set_user(self.user_id + 1)
