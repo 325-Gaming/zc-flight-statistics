@@ -476,21 +476,32 @@ class SimpleApp:
 
         navigation = ttk.Frame(main)
         navigation.grid(row=1, column=0, sticky="ew", pady=(0, 16))
-        navigation.columnconfigure((0, 1), weight=1, uniform="navigation")
+        navigation.columnconfigure((0, 1, 2), weight=1, uniform="navigation")
         self.button_previous_user = ttk.Button(
             navigation, text="上一位乘客", command=self.previous_user
         )
         self.button_previous_user.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.button_insert_user = ttk.Button(
+            navigation, text="新乘客", command=self.insert_new_user
+        )
+        self.button_insert_user.grid(row=0, column=1, sticky="ew", padx=6)
         self.button_new_user = ttk.Button(
             navigation, text="下一位乘客", command=self.new_user
         )
-        self.button_new_user.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.button_new_user.grid(row=0, column=2, sticky="ew", padx=(6, 0))
 
         ttk.Label(main, text="当前乘客：").grid(row=2, column=0, sticky="w")
-        self.entry_nickname = ttk.Entry(main)
-        self.entry_nickname.grid(row=3, column=0, sticky="ew", pady=(5, 18))
+        nickname_row = ttk.Frame(main)
+        nickname_row.grid(row=3, column=0, sticky="ew", pady=(5, 18))
+        nickname_row.columnconfigure(0, weight=1)
+        self.entry_nickname = ttk.Entry(nickname_row)
+        self.entry_nickname.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.entry_nickname.bind("<FocusOut>", self.sync_current_user)
         self.entry_nickname.bind("<Return>", self.sync_current_user)
+        self.button_rename_user = ttk.Button(
+            nickname_row, text="重命名", command=self.rename_current_user
+        )
+        self.button_rename_user.grid(row=0, column=1, padx=(6, 0))
 
         single_group = ttk.LabelFrame(main, text="单抽", padding=12)
         single_group.grid(row=4, column=0, sticky="ew", pady=(0, 16))
@@ -658,8 +669,40 @@ class SimpleApp:
             if request_set_current_user(current_user_name):
                 self.last_synced_user = current_user_name
 
+    def rename_current_user(self):
+        new_user_name = self.entry_nickname.get().strip()
+        if not new_user_name:
+            messagebox.showwarning("重命名失败", "乘客名字不能为空。")
+            return
+        if not 0 <= self.user_id < len(self.user_name_list):
+            return
+        self.user_name_list[self.user_id] = new_user_name
+        self.passenger_listbox.delete(self.user_id)
+        self.passenger_listbox.insert(self.user_id, new_user_name)
+        self.passenger_listbox.selection_set(self.user_id)
+        self.passenger_listbox.see(self.user_id)
+        self.sync_current_user()
+
     def new_user(self):
-        self.set_user(self.user_id + 1)
+        next_user_id = self.user_id + 1
+        if next_user_id >= len(self.user_name_list):
+            self.user_name_list.append(self.generate_passenger_name())
+            self.refresh_passenger_list()
+        self.set_user(next_user_id)
+
+    def insert_new_user(self):
+        new_user_id = min(self.user_id + 1, len(self.user_name_list))
+        self.user_name_list.insert(new_user_id, self.generate_passenger_name())
+        self.refresh_passenger_list()
+        self.set_user(new_user_id)
+
+    def generate_passenger_name(self):
+        passenger_number = len(self.user_name_list) + 1
+        passenger_name = f"乘客{passenger_number}"
+        while passenger_name in self.user_name_list:
+            passenger_number += 1
+            passenger_name = f"乘客{passenger_number}"
+        return passenger_name
 
     def previous_user(self):
         if self.user_id > 0:
