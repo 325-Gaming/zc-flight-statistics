@@ -22,7 +22,7 @@ from model_updater import ensure_latest_models
 from utils import expand_to_square, process_to_16_9
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 
 from hotkeys import register_hotkeys
 
@@ -336,70 +336,207 @@ class SimpleApp:
     def __init__(self, event_name, user_name_list):
         self.root = tk.Tk()
         self.root.title(_name)
-        self.root.geometry("600x800")
+        self.root.geometry("920x560")
+        self.root.minsize(860, 560)
         self.root.iconbitmap(BASE_DIR / 'favicon.ico')
         self.event_name = event_name
-        self.user_name_list = user_name_list
+        self.user_name_list = list(user_name_list)
         self.user_id = -1
         self.gacha_index = 1
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # 创建组件
-        # label_text = f"已经抽了{self.gacha_index - 1}抽"
-        label_text = ""
-        self.label = ttk.Label(self.root, text=label_text)
-        self.label.pack(fill=tk.X, padx=20, pady=10)
-
-        self.button_new_user = ttk.Button(self.root, text="下一位乘客~", command=self.new_user)
-        self.button_new_user.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_new_user.place(x=10, y=25, width=200)
-        self.label_user = ttk.Label(self.root, text=f"当前乘客：")
-        self.label_user.pack(fill=tk.X, padx=20, pady=10)
-        self.entry_nickname = ttk.Entry(self.root)
-        self.entry_nickname.pack(fill=tk.X, padx=20, pady=10)
-        # self.entry_nickname.place(x=10, y=60, width=200)
-
-
-        self.button_3 = ttk.Button(self.root, text=f"单抽三星（快捷键 {hotkey_3x}）", command=gacha_3x)
-        self.button_3.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_3.place(x=10, y=125, width=280)
-
-        self.button_4 = ttk.Button(self.root, text=f"单抽四星（快捷键 {hotkey_4x}）", command=gacha_4x)
-        self.button_4.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_4.place(x=10, y=225, width=280)
-
-        self.button_5 = ttk.Button(self.root, text=f"单抽五星（快捷键 {hotkey_5x}）", command=gacha_5x)
-        self.button_5.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_5.place(x=10, y=325, width=280)
-
-        self.button_6 = ttk.Button(self.root, text=f"单抽六星（快捷键 {hotkey_6x}）", command=gacha_6x)
-        self.button_6.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_6.place(x=10, y=425, width=280)
-        # self.entry_6x_name = ttk.Entry(self.root)
-        # self.entry_6x_name.pack(pady=10)
-        # self.entry_6x_name.place(x=10, y=390, width=200)
-
-        self.button_10_purple = ttk.Button(self.root, text="紫光转彩", command=self.purple_to_golden)
-        self.button_10_purple.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_10_purple.place(x=500, y=125, width=280)
-
-        self.button_10 = ttk.Button(self.root, text=f"十连（快捷键 {hotkey_gacha10}）", command=capture_and_predict)
-        self.button_10.pack(fill=tk.X, padx=20, pady=10)
-        # self.button_10.place(x=500, y=325, width=280)
-
-        # self.entry.pack(pady=10)
+        self.root.columnconfigure(1, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        self._create_passenger_sidebar()
+        self._create_main_panel()
 
         self.new_user()
 
+    def _create_passenger_sidebar(self):
+        sidebar = ttk.Frame(self.root, padding=(16, 16, 12, 16))
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        sidebar.rowconfigure(1, weight=1)
+        sidebar.columnconfigure(0, weight=1)
 
-    def new_user(self):
-        self.user_id += 1
+        header = ttk.Frame(sidebar)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="乘客列表", font=("TkDefaultFont", 14, "bold")).grid(
+            row=0, column=0, sticky="w"
+        )
+        menu_button = ttk.Menubutton(header, text="…", width=3)
+        menu_button.grid(row=0, column=1, sticky="e")
+        passenger_menu = tk.Menu(menu_button, tearoff=False)
+        passenger_menu.add_command(label="导入乘客名单…", command=self.import_passengers)
+        menu_button.configure(menu=passenger_menu)
+
+        list_frame = ttk.Frame(sidebar)
+        list_frame.grid(row=1, column=0, sticky="nsew")
+        list_frame.rowconfigure(0, weight=1)
+        list_frame.columnconfigure(0, weight=1)
+        self.passenger_listbox = tk.Listbox(
+            list_frame, width=24, activestyle="none", exportselection=False
+        )
+        self.passenger_listbox.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self.passenger_listbox.yview
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.passenger_listbox.configure(yscrollcommand=scrollbar.set)
+        self.passenger_listbox.bind("<<ListboxSelect>>", self.select_passenger)
+        self.refresh_passenger_list()
+
+    def _create_main_panel(self):
+        main = ttk.Frame(self.root, padding=(20, 16, 20, 20))
+        main.grid(row=0, column=1, sticky="nsew")
+        main.columnconfigure(0, weight=1)
+
+        self.label = ttk.Label(main, text="")
+        self.label.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        navigation = ttk.Frame(main)
+        navigation.grid(row=1, column=0, sticky="ew", pady=(0, 16))
+        navigation.columnconfigure((0, 1), weight=1, uniform="navigation")
+        self.button_previous_user = ttk.Button(
+            navigation, text="上一位乘客", command=self.previous_user
+        )
+        self.button_previous_user.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.button_new_user = ttk.Button(
+            navigation, text="下一位乘客", command=self.new_user
+        )
+        self.button_new_user.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        ttk.Label(main, text="当前乘客：").grid(row=2, column=0, sticky="w")
+        self.entry_nickname = ttk.Entry(main)
+        self.entry_nickname.grid(row=3, column=0, sticky="ew", pady=(5, 18))
+
+        single_group = ttk.LabelFrame(main, text="单抽", padding=12)
+        single_group.grid(row=4, column=0, sticky="ew", pady=(0, 16))
+        single_group.columnconfigure(0, weight=1)
+        single_row = ttk.Frame(single_group)
+        single_row.grid(row=0, column=0)
+        single_buttons = (
+            ("三星", hotkey_3x, gacha_3x),
+            ("四星", hotkey_4x, gacha_4x),
+            ("五星", hotkey_5x, gacha_5x),
+            ("六星", hotkey_6x, gacha_6x),
+        )
+        for column, (title, hotkey, command) in enumerate(single_buttons):
+            button = self._create_action_button(
+                single_row,
+                text=title,
+                command=command,
+                square=True,
+                shortcut=hotkey,
+            )
+            button.master.grid(row=0, column=column, padx=5)
+            setattr(self, f"button_{column + 3}", button)
+
+        ten_group = ttk.LabelFrame(main, text="十连", padding=12)
+        ten_group.grid(row=5, column=0, sticky="ew")
+        ten_group.columnconfigure(1, weight=1)
+        self.button_10_purple = self._create_action_button(
+            ten_group,
+            text="紫光转彩",
+            command=self.purple_to_golden,
+            square=True,
+        )
+        self.button_10_purple.master.grid(row=0, column=0, padx=5)
+        self.button_10 = self._create_action_button(
+            ten_group,
+            text="十连",
+            command=capture_and_predict,
+            shortcut=hotkey_gacha10,
+        )
+        self.button_10.master.grid(row=0, column=1, sticky="ew", padx=5)
+
+    def _create_action_button(
+        self, parent, text, command, square=False, shortcut=None
+    ):
+        """创建不受 macOS 原生 ttk 固定高度限制的操作按钮。"""
+        holder = ttk.Frame(parent, width=130 if square else 1, height=130)
+        holder.grid_propagate(False)
+        button = tk.Button(
+            holder,
+            text=text,
+            command=command,
+            anchor=tk.CENTER,
+            justify=tk.CENTER,
+            font=("TkDefaultFont", 12),
+            takefocus=True,
+        )
+        button.place(x=0, y=0, relwidth=1, relheight=1)
+        if shortcut:
+            shortcut_label = tk.Label(
+                button,
+                text=f"快捷键 {shortcut}",
+                background="white",
+                foreground="black",
+                font=("TkDefaultFont", 9),
+            )
+            shortcut_label.place(relx=0.5, rely=1.0, y=-12, anchor=tk.S)
+            shortcut_label.bind("<Button-1>", lambda _event: command())
+        return button
+
+    def refresh_passenger_list(self):
+        self.passenger_listbox.delete(0, tk.END)
+        for passenger_name in self.user_name_list:
+            self.passenger_listbox.insert(tk.END, passenger_name)
+
+    def import_passengers(self):
+        file_path = filedialog.askopenfilename(
+            title="导入乘客名单",
+            filetypes=(("名单文件", "*.csv *.txt"), ("所有文件", "*.*")),
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, "r", encoding="utf-8-sig") as passenger_file:
+                imported_names = [
+                    line.strip() for line in passenger_file if line.strip()
+                ]
+        except (OSError, UnicodeError) as error:
+            messagebox.showerror("导入失败", f"无法读取乘客名单：\n{error}")
+            return
+        if not imported_names:
+            messagebox.showwarning("导入失败", "选择的文件中没有乘客姓名。")
+            return
+        self.user_name_list = imported_names
+        self.user_id = -1
+        self.refresh_passenger_list()
+        self.new_user()
+
+    def select_passenger(self, _event=None):
+        selection = self.passenger_listbox.curselection()
+        if selection:
+            self.set_user(selection[0])
+
+    def set_user(self, user_id):
+        self.user_id = max(0, user_id)
         self.gacha_index = 1
         self.entry_nickname.delete(0, tk.END)
-        current_user_name = self.user_name_list[self.user_id] if self.user_id < len(self.user_name_list) else f'乘客{self.user_id + 1}'
+        current_user_name = (
+            self.user_name_list[self.user_id]
+            if self.user_id < len(self.user_name_list)
+            else f"乘客{self.user_id + 1}"
+        )
         self.entry_nickname.insert(0, current_user_name)
+        self.passenger_listbox.selection_clear(0, tk.END)
+        if self.user_id < len(self.user_name_list):
+            self.passenger_listbox.selection_set(self.user_id)
+            self.passenger_listbox.see(self.user_id)
+        self.button_previous_user.configure(
+            state=tk.DISABLED if self.user_id == 0 else tk.NORMAL
+        )
+
+    def new_user(self):
+        self.set_user(self.user_id + 1)
+
+    def previous_user(self):
+        if self.user_id > 0:
+            self.set_user(self.user_id - 1)
 
     def run(self):
         self.root.mainloop()
