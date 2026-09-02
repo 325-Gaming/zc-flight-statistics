@@ -957,7 +957,6 @@ class SimpleApp:
             background=surface_background,
             borderwidth=0,
             highlightthickness=0,
-            cursor="pointinghand",
             takefocus=True,
         )
         button.place(x=0, y=0, relwidth=1, relheight=1)
