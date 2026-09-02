@@ -29,9 +29,42 @@ def register_hotkeys(callbacks, dispatch=lambda callback: callback()):
 
     import keyboard
 
+    handles = []
     for hotkey, callback in callbacks.items():
-        keyboard.add_hotkey(hotkey, lambda cb=callback: dispatch(cb))
-    return keyboard
+        handles.append(
+            keyboard.add_hotkey(hotkey, lambda cb=callback: dispatch(cb))
+        )
+    return _KeyboardListener(keyboard, handles)
+
+
+class _KeyboardListener:
+    def __init__(self, keyboard, handles):
+        self.keyboard = keyboard
+        self.handles = handles
+
+    def stop(self):
+        for handle in self.handles:
+            self.keyboard.remove_hotkey(handle)
+        self.handles.clear()
+
+
+class _MacHotkeyListener:
+    def __init__(self, state, thread):
+        self.state = state
+        self.thread = thread
+
+    def stop(self):
+        from Quartz import CFMachPortInvalidate, CFRunLoopStop
+
+        run_loop = self.state.get("run_loop")
+        tap = self.state.get("tap")
+        if tap is not None:
+            CFMachPortInvalidate(tap)
+        if run_loop is not None:
+            CFRunLoopStop(run_loop)
+        if self.thread is not threading.current_thread():
+            self.thread.join(timeout=2)
+        self.state.clear()
 
 
 def _register_macos_hotkeys(callbacks, dispatch):
@@ -91,9 +124,11 @@ def _register_macos_hotkeys(callbacks, dispatch):
             ready.set()
             return
 
+        run_loop = CFRunLoopGetCurrent()
+        state["run_loop"] = run_loop
         source = CFMachPortCreateRunLoopSource(None, tap, 0)
         state["source"] = source
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes)
+        CFRunLoopAddSource(run_loop, source, kCFRunLoopCommonModes)
         CGEventTapEnable(tap, True)
         ready.set()
         CFRunLoopRun()
@@ -105,4 +140,4 @@ def _register_macos_hotkeys(callbacks, dispatch):
         raise state["error"]
     if not ready.is_set():
         raise RuntimeError("全局快捷键监听启动超时")
-    return state
+    return _MacHotkeyListener(state, thread)

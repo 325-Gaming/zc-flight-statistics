@@ -13,6 +13,7 @@ import numpy as np
 import os
 import pathlib
 import requests
+import signal
 import time
 
 from PIL import Image
@@ -344,6 +345,8 @@ class SimpleApp:
         self.user_name_list = list(user_name_list)
         self.user_id = -1
         self.gacha_index = 1
+        self.hotkey_listener = None
+        self.is_closing = False
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -647,8 +650,15 @@ class SimpleApp:
 
     def on_closing(self):
         """窗口关闭时的清理工作"""
+        if self.is_closing:
+            return
+        self.is_closing = True
         print("正在关闭程序...")
+        if self.hotkey_listener is not None:
+            self.hotkey_listener.stop()
+            self.hotkey_listener = None
         capture.sct.close()
+        client.close()
         self.root.destroy()
 
 
@@ -677,9 +687,11 @@ if __name__ == "__main__":
         hotkey_listener = None
         print(f'警告：{error}。仍可点击窗口中的按钮操作。')
     else:
+        app.hotkey_listener = hotkey_listener
         print('已绑定快捷键： 十连 [{}]'.format(hotkey_gacha10))
         print('已绑定快捷键： 单抽三星 [{}]'.format(hotkey_3x))
         print('已绑定快捷键： 单抽四星 [{}]'.format(hotkey_4x))
         print('已绑定快捷键： 单抽五星 [{}]'.format(hotkey_5x))
         print('已绑定快捷键： 单抽六星 [{}]'.format(hotkey_6x))
+    signal.signal(signal.SIGINT, lambda signum, frame: app.on_closing())
     app.run()
