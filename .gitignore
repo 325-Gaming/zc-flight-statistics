@@ -33,6 +33,10 @@ dist/
 .env.*
 !.env.example
 
+# Local application settings
+client/data-entry/config.json
+client/data-entry/name.csv
+
 # Trained model artifacts
 client/data-entry/models/*
 !client/data-entry/models/.gitkeep

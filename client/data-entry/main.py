@@ -9,6 +9,7 @@ import httpx
 import io
 import json
 import mss
+from mss.exception import ScreenShotError
 import numpy as np
 import os
 import pathlib
@@ -16,7 +17,7 @@ import requests
 import signal
 import time
 
-from PIL import Image
+from PIL import Image, ImageTk
 from dotenv import load_dotenv
 
 from model_updater import ensure_latest_models
@@ -33,15 +34,45 @@ _version_number = _version.lstrip('Vv')
 print('{} {} 启动！'.format(_name, _version))
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / '.env')
+CONFIG_PATH = BASE_DIR / 'config.json'
+CONFIG_EXAMPLE_PATH = BASE_DIR / 'config.example.json'
+ENV_PATH = BASE_DIR / '.env'
+ENV_EXAMPLE_PATH = BASE_DIR / '.env.example'
 
-login_token = os.getenv('ZCFLIGHT_LOGIN_TOKEN')
-if not login_token:
+env_was_created = False
+if not ENV_PATH.exists():
+    try:
+        ENV_PATH.write_text(
+            ENV_EXAMPLE_PATH.read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        ENV_PATH.chmod(0o600)
+        env_was_created = True
+    except OSError as error:
+        raise RuntimeError(f'无法根据环境变量模板创建 .env：{error}') from error
+
+if not CONFIG_PATH.exists():
+    try:
+        CONFIG_PATH.write_text(
+            CONFIG_EXAMPLE_PATH.read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+    except OSError as error:
+        raise RuntimeError(f'无法根据配置模板创建 config.json：{error}') from error
+
+load_dotenv(ENV_PATH)
+login_token = os.getenv('ZCFLIGHT_LOGIN_TOKEN', '').strip()
+if not login_token or login_token == 'replace-me':
+    detail = (
+        '已根据 .env.example 自动创建 .env，请填写真实 token 后重新启动'
+        if env_was_created
+        else '请在 .env 中填写真实 token'
+    )
     raise RuntimeError(
-        '缺少 ZCFLIGHT_LOGIN_TOKEN，请复制 .env.example 为 .env 并填入 token'
+        f'缺少有效的 ZCFLIGHT_LOGIN_TOKEN，{detail}'
     )
 
-with open(BASE_DIR / 'config.json', 'r', encoding='utf-8') as config_file:
+with open(CONFIG_PATH, 'r', encoding='utf-8') as config_file:
     config = json.load(config_file)
 target_monitor_id = int(config['target_monitor_id'])
 event_name = config['event_name']
@@ -51,6 +82,19 @@ hotkey_3x = config['hotkey_3x']
 hotkey_4x = config['hotkey_4x']
 hotkey_5x = config['hotkey_5x']
 hotkey_6x = config['hotkey_6x']
+
+passenger_list_path = BASE_DIR / user_name_list_file
+if user_name_list_file == 'name.csv' and not passenger_list_path.exists():
+    passenger_list_example_path = BASE_DIR / 'name.example.csv'
+    try:
+        passenger_list_path.write_text(
+            passenger_list_example_path.read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+    except OSError as error:
+        raise RuntimeError(
+            f'无法根据乘客名单模板创建 name.csv：{error}'
+        ) from error
 
 print('当前活动 {}'.format(event_name))
 
@@ -90,6 +134,15 @@ class MultiMonitorCapture:
             }
             for i, monitor in enumerate(self.monitors)
         ]
+
+    def refresh_monitors(self):
+        """重新读取当前系统中的显示器。"""
+        new_sct = mss.mss()
+        old_sct = self.sct
+        self.sct = new_sct
+        self.monitors = new_sct.monitors
+        old_sct.close()
+        return self.get_monitor_info()
 
     def capture_monitor(self, monitor_id=1, is_save=False, save_dir="./screenshots"):
         t0 = time.time()
@@ -205,7 +258,7 @@ for idx in range(len(operator_name_list)):
     operator_name_to_id[opr] = idx
 
 user_name_list = []
-with open(BASE_DIR / user_name_list_file, 'r', encoding='utf-8') as f:
+with open(passenger_list_path, 'r', encoding='utf-8') as f:
     for line in f.readlines():
         user_name_list.append(line.strip())
 print('从乘客名单中加载到{}位乘客'.format(len(user_name_list)))
@@ -361,8 +414,8 @@ class SimpleApp:
     def __init__(self, event_name, user_name_list):
         self.root = tk.Tk()
         self.root.title(_name)
-        self.root.geometry("920x560")
-        self.root.minsize(860, 560)
+        self.root.geometry("920x600")
+        self.root.minsize(860, 600)
         self._configure_light_theme()
         self.root.iconbitmap(BASE_DIR / 'favicon.ico')
         self.event_name = event_name
@@ -372,12 +425,14 @@ class SimpleApp:
         self.hotkey_listener = None
         self.is_closing = False
         self.last_synced_user = None
+        self.settings_window = None
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.root.columnconfigure(1, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=1)
+        self._create_menu_bar()
         self._create_passenger_sidebar()
         self._create_main_panel()
 
@@ -416,30 +471,44 @@ class SimpleApp:
             insertcolor="#1f1f1f",
         )
 
-    def _create_passenger_sidebar(self):
-        sidebar = ttk.Frame(self.root, padding=(16, 16, 12, 16))
-        sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.rowconfigure(1, weight=1)
-        sidebar.columnconfigure(0, weight=1)
+    def _create_menu_bar(self):
+        menu_bar = ttk.Frame(self.root, padding=(8, 4))
+        menu_bar.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        header = ttk.Frame(sidebar)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text="乘客列表", font=("TkDefaultFont", 14, "bold")).grid(
-            row=0, column=0, sticky="w"
-        )
-        menu_button = ttk.Menubutton(header, text="…", width=3)
-        menu_button.grid(row=0, column=1, sticky="e")
-        passenger_menu = tk.Menu(
-            menu_button,
+        file_button = ttk.Menubutton(menu_bar, text="文件")
+        file_button.pack(side=tk.LEFT, padx=(0, 4))
+        file_menu = self._create_menu(file_button)
+        file_menu.add_command(label="导入乘客名单…", command=self.import_passengers)
+        file_menu.add_command(label="设置…", command=self.open_settings)
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.on_closing)
+        file_button.configure(menu=file_menu)
+
+        statistics_button = ttk.Menubutton(menu_bar, text="统计")
+        statistics_button.pack(side=tk.LEFT)
+        statistics_menu = self._create_menu(statistics_button)
+        statistics_menu.add_command(label="查看统计", command=lambda: None)
+        statistics_button.configure(menu=statistics_menu)
+
+    def _create_menu(self, parent):
+        return tk.Menu(
+            parent,
             tearoff=False,
             background="#ffffff",
             foreground="#1f1f1f",
             activebackground="#d7e9fb",
             activeforeground="#1f1f1f",
         )
-        passenger_menu.add_command(label="导入乘客名单…", command=self.import_passengers)
-        menu_button.configure(menu=passenger_menu)
+
+    def _create_passenger_sidebar(self):
+        sidebar = ttk.Frame(self.root, padding=(16, 16, 12, 16))
+        sidebar.grid(row=1, column=0, sticky="nsew")
+        sidebar.rowconfigure(1, weight=1)
+        sidebar.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            sidebar, text="乘客列表", font=("TkDefaultFont", 14, "bold")
+        ).grid(row=0, column=0, sticky="w", pady=(0, 10))
 
         list_frame = ttk.Frame(sidebar)
         list_frame.grid(row=1, column=0, sticky="nsew")
@@ -466,9 +535,331 @@ class SimpleApp:
         self.passenger_listbox.bind("<<ListboxSelect>>", self.select_passenger)
         self.refresh_passenger_list()
 
+    def open_settings(self):
+        if self.settings_window is not None and self.settings_window.winfo_exists():
+            self.settings_window.lift()
+            self.settings_window.focus_force()
+            return
+
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as config_file:
+                current_config = json.load(config_file)
+        except (OSError, json.JSONDecodeError) as error:
+            messagebox.showerror("无法打开设置", f"读取 config.json 失败：\n{error}")
+            return
+
+        window = tk.Toplevel(self.root)
+        self.settings_window = window
+        window.title("设置")
+        window.geometry("780x620")
+        window.minsize(700, 560)
+        window.configure(background="#f2f2f2")
+        window.transient(self.root)
+        window.columnconfigure(0, weight=1)
+
+        settings = (
+            ("event_name", "活动名称", "提交抽卡记录时使用的活动名称。"),
+            (
+                "target_monitor_id",
+                "截图显示器编号",
+                "执行识别时需要截取的显示器编号。",
+            ),
+            (
+                "user_name_list_file",
+                "乘客名单文件",
+                "程序启动时读取的乘客名单文件，相对于程序目录。",
+            ),
+            ("hotkey_gacha10", "十连快捷键", "触发十连截图和识别。"),
+            ("hotkey_3x", "三星快捷键", "提交一次三星单抽记录。"),
+            ("hotkey_4x", "四星快捷键", "提交一次四星单抽记录。"),
+            ("hotkey_5x", "五星快捷键", "提交一次五星单抽记录。"),
+            ("hotkey_6x", "六星快捷键", "提交一次六星单抽记录。"),
+        )
+        content = ttk.Frame(window, padding=18)
+        content.grid(row=0, column=0, sticky="nsew")
+        content.columnconfigure(1, weight=1)
+        entries = {}
+        for index, (key, label, description) in enumerate(settings):
+            row = index * 2
+            ttk.Label(content, text=label).grid(
+                row=row, column=0, sticky="w", padx=(0, 12), pady=6
+            )
+            if key == "target_monitor_id":
+                monitor_row = ttk.Frame(content)
+                monitor_row.grid(row=row, column=1, sticky="ew", pady=6)
+                monitor_row.columnconfigure(0, weight=1)
+                monitor_selector = ttk.Combobox(monitor_row, state="readonly")
+                monitor_selector.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+                self.update_monitor_selector(
+                    monitor_selector, current_config.get(key, 0)
+                )
+                ttk.Button(
+                    monitor_row,
+                    text="刷新列表",
+                    command=lambda selector=monitor_selector: self.refresh_monitor_list(
+                        selector, window
+                    ),
+                ).grid(row=0, column=1, padx=6)
+                ttk.Button(
+                    monitor_row,
+                    text="显示预览",
+                    command=lambda selector=monitor_selector: self.show_monitor_preview(
+                        selector, window
+                    ),
+                ).grid(row=0, column=2, padx=(6, 0))
+                entries[key] = monitor_selector
+            else:
+                entry = ttk.Entry(content)
+                entry.grid(row=row, column=1, sticky="ew", pady=6)
+                entry.insert(0, str(current_config.get(key, "")))
+                entries[key] = entry
+            ttk.Label(content, text=description).grid(
+                row=row + 1,
+                column=1,
+                sticky="w",
+                pady=(0, 5),
+            )
+
+        ttk.Label(content, text="保存后立即生效；更换乘客名单会替换当前列表。").grid(
+            row=len(settings) * 2,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(12, 8),
+        )
+        actions = ttk.Frame(content)
+        actions.grid(row=len(settings) * 2 + 1, column=0, columnspan=2, sticky="e")
+        ttk.Button(actions, text="取消", command=window.destroy).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Button(
+            actions,
+            text="保存",
+            command=lambda: self.save_settings(entries, window),
+        ).pack(side=tk.LEFT)
+        window.protocol("WM_DELETE_WINDOW", window.destroy)
+
+    def update_monitor_selector(self, selector, selected_monitor_id=None):
+        monitor_info = capture.get_monitor_info()
+        selector.monitor_ids = [monitor["index"] for monitor in monitor_info]
+        selector["values"] = [
+            (
+                f'{monitor["index"]} — {monitor["description"]} · '
+                f'{monitor["size"][0]}×{monitor["size"][1]} · '
+                f'位置 {monitor["position"][0]}, {monitor["position"][1]}'
+            )
+            for monitor in monitor_info
+        ]
+        try:
+            selected_index = selector.monitor_ids.index(int(selected_monitor_id))
+        except (TypeError, ValueError):
+            selected_index = 0 if selector.monitor_ids else -1
+        if selected_index >= 0:
+            selector.current(selected_index)
+        else:
+            selector.set("")
+
+    def get_selected_monitor_id(self, selector):
+        selected_index = selector.current()
+        if selected_index < 0 or selected_index >= len(selector.monitor_ids):
+            return None
+        return selector.monitor_ids[selected_index]
+
+    def refresh_monitor_list(self, selector, parent):
+        selected_monitor_id = self.get_selected_monitor_id(selector)
+        try:
+            capture.refresh_monitors()
+        except (OSError, ScreenShotError) as error:
+            messagebox.showerror(
+                "刷新失败", f"无法刷新显示器列表：\n{error}", parent=parent
+            )
+            return
+        self.update_monitor_selector(selector, selected_monitor_id)
+
+    def show_monitor_preview(self, selector, parent):
+        monitor_id = self.get_selected_monitor_id(selector)
+        if monitor_id is None:
+            messagebox.showwarning("无法预览", "请先选择一个显示器。", parent=parent)
+            return
+        try:
+            preview_image = capture.capture_monitor(monitor_id, is_save=False)
+        except (OSError, ScreenShotError, ValueError) as error:
+            messagebox.showerror(
+                "预览失败", f"无法截取所选显示器：\n{error}", parent=parent
+            )
+            return
+
+        preview_image.thumbnail((960, 600), Image.LANCZOS)
+        preview_window = tk.Toplevel(parent)
+        preview_window.title(f"显示器 {monitor_id} 预览")
+        preview_window.configure(background="#f2f2f2")
+        preview_photo = ImageTk.PhotoImage(preview_image)
+        preview_label = ttk.Label(preview_window, image=preview_photo)
+        preview_label.image = preview_photo
+        preview_label.pack(padx=12, pady=12)
+        preview_window.transient(parent)
+
+    def save_settings(self, entries, window):
+        global event_name
+        global hotkey_3x
+        global hotkey_4x
+        global hotkey_5x
+        global hotkey_6x
+        global hotkey_gacha10
+        global target_monitor_id
+        global user_name_list_file
+
+        values = {
+            key: (
+                self.get_selected_monitor_id(entry)
+                if key == "target_monitor_id"
+                else entry.get().strip()
+            )
+            for key, entry in entries.items()
+        }
+        if any(
+            value is None or (isinstance(value, str) and not value)
+            for value in values.values()
+        ):
+            messagebox.showwarning("无法保存", "所有设置项都必须填写。", parent=window)
+            return
+        if not 0 <= values["target_monitor_id"] < len(capture.monitors):
+            messagebox.showwarning(
+                "无法保存",
+                f"显示器编号应在 0 到 {len(capture.monitors) - 1} 之间。",
+                parent=window,
+            )
+            return
+
+        hotkey_keys = (
+            "hotkey_gacha10",
+            "hotkey_3x",
+            "hotkey_4x",
+            "hotkey_5x",
+            "hotkey_6x",
+        )
+        new_hotkeys = {key: values[key] for key in hotkey_keys}
+        if len(set(new_hotkeys.values())) != len(new_hotkeys):
+            messagebox.showwarning("无法保存", "快捷键不能重复。", parent=window)
+            return
+
+        new_user_name_list = None
+        if values["user_name_list_file"] != user_name_list_file:
+            passenger_list_path = BASE_DIR / values["user_name_list_file"]
+            try:
+                with open(passenger_list_path, "r", encoding="utf-8-sig") as list_file:
+                    new_user_name_list = [
+                        line.strip() for line in list_file if line.strip()
+                    ]
+            except (OSError, UnicodeError) as error:
+                messagebox.showerror(
+                    "无法保存", f"读取乘客名单失败：\n{error}", parent=window
+                )
+                return
+            if not new_user_name_list:
+                messagebox.showwarning(
+                    "无法保存", "新的乘客名单中没有乘客名字。", parent=window
+                )
+                return
+            if not messagebox.askyesno(
+                "替换乘客名单",
+                "更换乘客名单将替换当前列表，并切换到第一位乘客。是否继续？",
+                parent=window,
+            ):
+                return
+
+        old_hotkeys = {
+            "hotkey_gacha10": hotkey_gacha10,
+            "hotkey_3x": hotkey_3x,
+            "hotkey_4x": hotkey_4x,
+            "hotkey_5x": hotkey_5x,
+            "hotkey_6x": hotkey_6x,
+        }
+        hotkeys_changed = new_hotkeys != old_hotkeys
+        old_listener = self.hotkey_listener
+        new_listener = old_listener
+        if hotkeys_changed:
+            if old_listener is not None:
+                old_listener.stop()
+            try:
+                new_listener = self.create_hotkey_listener(new_hotkeys)
+            except (RuntimeError, ValueError) as error:
+                self.hotkey_listener = self.restore_hotkey_listener(old_hotkeys)
+                messagebox.showerror(
+                    "无法保存", f"应用新快捷键失败：\n{error}", parent=window
+                )
+                return
+
+        temporary_config_path = CONFIG_PATH.with_suffix(".json.tmp")
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as config_file:
+                updated_config = json.load(config_file)
+            updated_config.update(values)
+            with open(temporary_config_path, "w", encoding="utf-8") as config_file:
+                json.dump(updated_config, config_file, ensure_ascii=False, indent=4)
+                config_file.write("\n")
+            temporary_config_path.replace(CONFIG_PATH)
+        except (OSError, json.JSONDecodeError) as error:
+            if temporary_config_path.exists():
+                temporary_config_path.unlink()
+            if hotkeys_changed:
+                if new_listener is not None:
+                    new_listener.stop()
+                self.hotkey_listener = self.restore_hotkey_listener(old_hotkeys)
+            messagebox.showerror("保存失败", f"无法更新 config.json：\n{error}", parent=window)
+            return
+
+        event_name = values["event_name"]
+        target_monitor_id = values["target_monitor_id"]
+        user_name_list_file = values["user_name_list_file"]
+        hotkey_gacha10 = new_hotkeys["hotkey_gacha10"]
+        hotkey_3x = new_hotkeys["hotkey_3x"]
+        hotkey_4x = new_hotkeys["hotkey_4x"]
+        hotkey_5x = new_hotkeys["hotkey_5x"]
+        hotkey_6x = new_hotkeys["hotkey_6x"]
+        config.clear()
+        config.update(values)
+        self.event_name = event_name
+        self.hotkey_listener = new_listener
+        self.update_hotkey_labels(new_hotkeys)
+        if new_user_name_list is not None:
+            self.user_name_list = new_user_name_list
+            self.user_id = -1
+            self.refresh_passenger_list()
+            self.new_user()
+
+        messagebox.showinfo("设置已保存", "新设置已经生效。", parent=window)
+        window.destroy()
+
+    def create_hotkey_listener(self, hotkeys):
+        return register_hotkeys(
+            {
+                hotkeys["hotkey_gacha10"]: capture_and_predict,
+                hotkeys["hotkey_3x"]: gacha_3x,
+                hotkeys["hotkey_4x"]: gacha_4x,
+                hotkeys["hotkey_5x"]: gacha_5x,
+                hotkeys["hotkey_6x"]: gacha_6x,
+            },
+            dispatch=lambda callback: self.root.after(0, callback),
+        )
+
+    def restore_hotkey_listener(self, hotkeys):
+        try:
+            return self.create_hotkey_listener(hotkeys)
+        except (RuntimeError, ValueError) as error:
+            print(f"警告：恢复原快捷键失败：{error}")
+            return None
+
+    def update_hotkey_labels(self, hotkeys):
+        self.button_3.set_shortcut(hotkeys["hotkey_3x"])
+        self.button_4.set_shortcut(hotkeys["hotkey_4x"])
+        self.button_5.set_shortcut(hotkeys["hotkey_5x"])
+        self.button_6.set_shortcut(hotkeys["hotkey_6x"])
+        self.button_10.set_shortcut(hotkeys["hotkey_gacha10"])
+
     def _create_main_panel(self):
         main = ttk.Frame(self.root, padding=(20, 16, 20, 20))
-        main.grid(row=0, column=1, sticky="nsew")
+        main.grid(row=1, column=1, sticky="nsew")
         main.columnconfigure(0, weight=1)
 
         self.label = ttk.Label(main, text="")
@@ -570,6 +961,7 @@ class SimpleApp:
             takefocus=True,
         )
         button.place(x=0, y=0, relwidth=1, relheight=1)
+        shortcut_value = shortcut
 
         def draw(state="normal"):
             button.delete("all")
@@ -592,16 +984,22 @@ class SimpleApp:
                 font=("TkDefaultFont", 12),
                 anchor=tk.CENTER,
             )
-            if shortcut:
+            if shortcut_value:
                 button.create_text(
                     width / 2,
                     height - 16,
-                    text=f"快捷键 {shortcut}",
+                    text=f"快捷键 {shortcut_value}",
                     fill=colors["text"],
                     font=("TkDefaultFont", 9),
                     anchor=tk.S,
                 )
 
+        def set_shortcut(value):
+            nonlocal shortcut_value
+            shortcut_value = value
+            draw()
+
+        button.set_shortcut = set_shortcut
         button.bind("<Configure>", lambda _event: draw())
         button.bind("<Enter>", lambda _event: draw("hover"))
         button.bind("<Leave>", lambda _event: draw())
@@ -750,17 +1148,16 @@ if __name__ == "__main__":
     app = SimpleApp(event_name, user_name_list)
 
     try:
-        hotkey_listener = register_hotkeys(
+        hotkey_listener = app.create_hotkey_listener(
             {
-                hotkey_gacha10: capture_and_predict,
-                hotkey_3x: gacha_3x,
-                hotkey_4x: gacha_4x,
-                hotkey_5x: gacha_5x,
-                hotkey_6x: gacha_6x,
-            },
-            dispatch=lambda callback: app.root.after(0, callback),
+                "hotkey_gacha10": hotkey_gacha10,
+                "hotkey_3x": hotkey_3x,
+                "hotkey_4x": hotkey_4x,
+                "hotkey_5x": hotkey_5x,
+                "hotkey_6x": hotkey_6x,
+            }
         )
-    except RuntimeError as error:
+    except (RuntimeError, ValueError) as error:
         hotkey_listener = None
         print(f'警告：{error}。仍可点击窗口中的按钮操作。')
     else:
