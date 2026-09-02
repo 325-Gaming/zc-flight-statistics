@@ -338,6 +338,7 @@ class SimpleApp:
         self.root.title(_name)
         self.root.geometry("920x560")
         self.root.minsize(860, 560)
+        self._configure_light_theme()
         self.root.iconbitmap(BASE_DIR / 'favicon.ico')
         self.event_name = event_name
         self.user_name_list = list(user_name_list)
@@ -354,6 +355,39 @@ class SimpleApp:
 
         self.new_user()
 
+    def _configure_light_theme(self):
+        """固定使用浅色主题，不跟随系统明暗模式变化。"""
+        self.root.configure(background="#f2f2f2")
+        style = ttk.Style(self.root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        style.configure(".", background="#f2f2f2", foreground="#1f1f1f")
+        style.configure("TFrame", background="#f2f2f2")
+        style.configure("TLabel", background="#f2f2f2", foreground="#1f1f1f")
+        style.configure("TLabelframe", background="#f2f2f2")
+        style.configure(
+            "TLabelframe.Label", background="#f2f2f2", foreground="#1f1f1f"
+        )
+        style.configure(
+            "TButton",
+            background="#ffffff",
+            foreground="#1f1f1f",
+            bordercolor="#c8c8c8",
+            lightcolor="#ffffff",
+            darkcolor="#c8c8c8",
+        )
+        style.map(
+            "TButton",
+            background=[("pressed", "#e3e3e3"), ("active", "#f5f5f5")],
+            foreground=[("disabled", "#8a8a8a")],
+        )
+        style.configure(
+            "TEntry",
+            fieldbackground="#ffffff",
+            foreground="#1f1f1f",
+            insertcolor="#1f1f1f",
+        )
+
     def _create_passenger_sidebar(self):
         sidebar = ttk.Frame(self.root, padding=(16, 16, 12, 16))
         sidebar.grid(row=0, column=0, sticky="nsew")
@@ -368,7 +402,14 @@ class SimpleApp:
         )
         menu_button = ttk.Menubutton(header, text="…", width=3)
         menu_button.grid(row=0, column=1, sticky="e")
-        passenger_menu = tk.Menu(menu_button, tearoff=False)
+        passenger_menu = tk.Menu(
+            menu_button,
+            tearoff=False,
+            background="#ffffff",
+            foreground="#1f1f1f",
+            activebackground="#d7e9fb",
+            activeforeground="#1f1f1f",
+        )
         passenger_menu.add_command(label="导入乘客名单…", command=self.import_passengers)
         menu_button.configure(menu=passenger_menu)
 
@@ -377,7 +418,16 @@ class SimpleApp:
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
         self.passenger_listbox = tk.Listbox(
-            list_frame, width=24, activestyle="none", exportselection=False
+            list_frame,
+            width=24,
+            activestyle="none",
+            exportselection=False,
+            background="#ffffff",
+            foreground="#1f1f1f",
+            selectbackground="#a8cff5",
+            selectforeground="#1f1f1f",
+            highlightbackground="#c8c8c8",
+            highlightcolor="#6aa9e9",
         )
         self.passenger_listbox.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(
@@ -436,48 +486,88 @@ class SimpleApp:
 
         ten_group = ttk.LabelFrame(main, text="十连", padding=12)
         ten_group.grid(row=5, column=0, sticky="ew")
-        ten_group.columnconfigure(1, weight=1)
+        ten_group.columnconfigure(0, weight=1)
+        ten_row = ttk.Frame(ten_group)
+        ten_row.grid(row=0, column=0)
         self.button_10_purple = self._create_action_button(
-            ten_group,
+            ten_row,
             text="紫光转彩",
             command=self.purple_to_golden,
             square=True,
         )
         self.button_10_purple.master.grid(row=0, column=0, padx=5)
         self.button_10 = self._create_action_button(
-            ten_group,
+            ten_row,
             text="十连",
             command=capture_and_predict,
             shortcut=hotkey_gacha10,
+            width=410,
         )
-        self.button_10.master.grid(row=0, column=1, sticky="ew", padx=5)
+        self.button_10.master.grid(row=0, column=1, padx=5)
 
     def _create_action_button(
-        self, parent, text, command, square=False, shortcut=None
+        self, parent, text, command, square=False, shortcut=None, width=None
     ):
-        """创建不受 macOS 原生 ttk 固定高度限制的操作按钮。"""
-        holder = ttk.Frame(parent, width=130 if square else 1, height=130)
+        """创建尺寸可控、使用固定浅色配色的自绘按钮。"""
+        button_width = 130 if square else (width or 1)
+        holder = ttk.Frame(parent, width=button_width, height=130)
         holder.grid_propagate(False)
-        button = tk.Button(
+        surface_background = "#f2f2f2"
+        colors = {
+            "normal": "#ffffff",
+            "hover": "#f5f5f5",
+            "pressed": "#e3e3e3",
+            "border": "#c8c8c8",
+            "text": "#1f1f1f",
+        }
+        button = tk.Canvas(
             holder,
-            text=text,
-            command=command,
-            anchor=tk.CENTER,
-            justify=tk.CENTER,
-            font=("TkDefaultFont", 12),
+            background=surface_background,
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="pointinghand",
             takefocus=True,
         )
         button.place(x=0, y=0, relwidth=1, relheight=1)
-        if shortcut:
-            shortcut_label = tk.Label(
-                button,
-                text=f"快捷键 {shortcut}",
-                background="white",
-                foreground="black",
-                font=("TkDefaultFont", 9),
+
+        def draw(state="normal"):
+            button.delete("all")
+            width = max(button.winfo_width(), 2)
+            height = max(button.winfo_height(), 2)
+            button.create_rectangle(
+                1,
+                1,
+                width - 1,
+                height - 1,
+                fill=colors[state],
+                outline=colors["border"],
+                width=1,
             )
-            shortcut_label.place(relx=0.5, rely=1.0, y=-12, anchor=tk.S)
-            shortcut_label.bind("<Button-1>", lambda _event: command())
+            button.create_text(
+                width / 2,
+                height / 2,
+                text=text,
+                fill=colors["text"],
+                font=("TkDefaultFont", 12),
+                anchor=tk.CENTER,
+            )
+            if shortcut:
+                button.create_text(
+                    width / 2,
+                    height - 16,
+                    text=f"快捷键 {shortcut}",
+                    fill=colors["text"],
+                    font=("TkDefaultFont", 9),
+                    anchor=tk.S,
+                )
+
+        button.bind("<Configure>", lambda _event: draw())
+        button.bind("<Enter>", lambda _event: draw("hover"))
+        button.bind("<Leave>", lambda _event: draw())
+        button.bind("<ButtonPress-1>", lambda _event: draw("pressed"))
+        button.bind("<ButtonRelease-1>", lambda _event: (draw("hover"), command()))
+        button.bind("<Return>", lambda _event: command())
+        button.bind("<space>", lambda _event: command())
         return button
 
     def refresh_passenger_list(self):
