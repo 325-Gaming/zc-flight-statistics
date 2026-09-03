@@ -1,8 +1,10 @@
 import hashlib
 import json
+import math
 import os
 import pathlib
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Tuple
 from urllib.parse import urljoin
@@ -15,6 +17,7 @@ DEFAULT_MODEL_FILES = {
     "image_type": "image_type.keras",
     "gacha10": "gacha10.keras",
 }
+MEBIBYTE = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,46 @@ def _sha256(path: pathlib.Path) -> str:
         for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _format_download_status(
+    model_name: str,
+    downloaded_size: int,
+    expected_size: int,
+    speed: float,
+    model_name_width: int,
+    size_width: int,
+) -> str:
+    progress = min(downloaded_size / expected_size * 100, 100) if expected_size else 100
+    remaining_size = max(expected_size - downloaded_size, 0)
+    eta_seconds = math.ceil(remaining_size / speed) if speed > 0 else 0
+    eta_minutes, eta_seconds = divmod(min(eta_seconds, 5999), 60)
+    return (
+        f"下载 {model_name:<{model_name_width}}  "
+        f"{downloaded_size / MEBIBYTE:>{size_width}.2f}/"
+        f"{expected_size / MEBIBYTE:>{size_width}.2f} MiB  "
+        f"{progress:>5.1f}%  "
+        f"{speed / MEBIBYTE:>7.2f} MiB/s  "
+        f"剩余 {eta_minutes:02d}:{eta_seconds:02d}"
+    )
+
+
+def _format_download_complete(
+    model_name: str,
+    downloaded_size: int,
+    elapsed: float,
+    model_name_width: int,
+    size_width: int,
+) -> str:
+    average_speed = downloaded_size / elapsed if elapsed > 0 else 0
+    elapsed_seconds = math.ceil(elapsed)
+    elapsed_minutes, elapsed_seconds = divmod(min(elapsed_seconds, 5999), 60)
+    return (
+        f"完成 {model_name:<{model_name_width}}  "
+        f"{downloaded_size / MEBIBYTE:>{size_width}.2f} MiB  "
+        f"用时 {elapsed_minutes:02d}:{elapsed_seconds:02d}  "
+        f"平均 {average_speed / MEBIBYTE:>7.2f} MiB/s"
+    )
 
 
 def _load_local_manifest(path: pathlib.Path) -> dict:
@@ -89,6 +132,8 @@ def _download_and_replace(
     expected_sha256: str,
     expected_size: int,
     headers: Mapping[str, str],
+    model_name_width: int,
+    size_width: int,
 ) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(
@@ -96,6 +141,12 @@ def _download_and_replace(
     )
     digest = hashlib.sha256()
     downloaded_size = 0
+    start_time = time.monotonic()
+    last_report_size = 0
+    last_report_time = start_time
+    smoothed_speed = None
+    progress_line_active = False
+    progress_line_length = 0
     try:
         with os.fdopen(fd, "wb") as output_file:
             with client.stream("GET", download_url, headers=headers) as response:
@@ -104,9 +155,33 @@ def _download_and_replace(
                     output_file.write(chunk)
                     digest.update(chunk)
                     downloaded_size += len(chunk)
+                    now = time.monotonic()
+                    interval = now - last_report_time
+                    if interval >= 0.5:
+                        current_speed = (downloaded_size - last_report_size) / interval
+                        smoothed_speed = (
+                            current_speed
+                            if smoothed_speed is None
+                            else 0.25 * current_speed + 0.75 * smoothed_speed
+                        )
+                        status_line = _format_download_status(
+                            destination.name,
+                            downloaded_size,
+                            expected_size,
+                            smoothed_speed,
+                            model_name_width,
+                            size_width,
+                        )
+                        print("\r" + status_line, end="", flush=True)
+                        progress_line_active = True
+                        progress_line_length = len(status_line)
+                        last_report_size = downloaded_size
+                        last_report_time = now
+
             output_file.flush()
             os.fsync(output_file.fileno())
 
+        elapsed = max(time.monotonic() - start_time, 0.001)
         if downloaded_size != expected_size:
             raise ValueError(
                 f"模型 {destination.name} 大小不符: "
@@ -116,7 +191,18 @@ def _download_and_replace(
         if actual_sha256 != expected_sha256:
             raise ValueError(f"模型 {destination.name} SHA-256 校验失败")
         os.replace(temp_name, destination)
+        complete_line = _format_download_complete(
+            destination.name,
+            downloaded_size,
+            elapsed,
+            model_name_width,
+            size_width,
+        )
+        print("\r" + complete_line.ljust(progress_line_length))
+        progress_line_active = False
     except Exception:
+        if progress_line_active:
+            print()
         try:
             os.unlink(temp_name)
         except FileNotFoundError:
@@ -145,6 +231,14 @@ def update_models(
         response.raise_for_status()
         remote_models = _validate_remote_manifest(response.json())
         results: Dict[str, ModelUpdateResult] = {}
+        model_name_width = max(len(filename) for filename in model_files.values())
+        remote_sizes = [
+            model.get("size", 0)
+            for name, model in remote_models.items()
+            if name in model_files and isinstance(model, dict)
+        ]
+        largest_size = max(remote_sizes, default=0)
+        size_width = max(len(f"{largest_size / MEBIBYTE:.2f}"), 4)
 
         for name, filename in model_files.items():
             remote = remote_models.get(name)
@@ -190,6 +284,8 @@ def update_models(
                     sha256,
                     size,
                     headers,
+                    model_name_width,
+                    size_width,
                 )
                 status = "downloaded"
             else:

@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from model_updater import ensure_latest_models
 from utils import expand_to_square, process_to_16_9
+from version import __version__
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -29,8 +30,8 @@ from tkinter import filedialog, messagebox, ttk
 from hotkeys import register_hotkeys
 
 _name = 'Zc航空抽卡统计'
-_version = 'V0.2.0'
-_version_number = _version.lstrip('Vv')
+_version = f'V{__version__}'
+_version_number = __version__
 print('{} {} 启动！'.format(_name, _version))
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -413,7 +414,7 @@ def capture_and_predict():
 class SimpleApp:
     def __init__(self, event_name, user_name_list):
         self.root = tk.Tk()
-        self.root.title(_name)
+        self.root.title(f'{_name} {_version}')
         self.root.geometry("920x600")
         self.root.minsize(860, 600)
         self._configure_light_theme()
@@ -949,7 +950,7 @@ class SimpleApp:
         ten_row.grid(row=0, column=0)
         self.button_10_purple = self._create_action_button(
             ten_row,
-            text="紫光转彩",
+            text="紫光镀彩",
             command=self.purple_to_golden,
             square=True,
         )

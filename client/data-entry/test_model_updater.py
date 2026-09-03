@@ -11,10 +11,45 @@ import httpx
 DATA_ENTRY_DIR = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(DATA_ENTRY_DIR))
 
-from model_updater import update_models  # noqa: E402
+from model_updater import (  # noqa: E402
+    MEBIBYTE,
+    _format_download_complete,
+    _format_download_status,
+    update_models,
+)
 
 
 class ModelUpdaterTests(unittest.TestCase):
+    def test_formats_download_status(self):
+        status = _format_download_status(
+            "gacha10",
+            10 * MEBIBYTE,
+            32 * MEBIBYTE,
+            2 * MEBIBYTE,
+            16,
+            5,
+        )
+
+        self.assertEqual(
+            status,
+            "下载 gacha10           10.00/32.00 MiB   31.2%     2.00 MiB/s  "
+            "剩余 00:11",
+        )
+
+    def test_formats_download_complete(self):
+        status = _format_download_complete(
+            "gacha10.keras",
+            32 * MEBIBYTE,
+            10,
+            16,
+            5,
+        )
+
+        self.assertEqual(
+            status,
+            "完成 gacha10.keras     32.00 MiB  用时 00:10  平均    3.20 MiB/s",
+        )
+
     def _client(self, files, versions=None, corrupt_download=False):
         versions = versions or {name: "2026.09.02.1" for name in files}
 
