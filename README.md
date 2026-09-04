@@ -38,18 +38,18 @@ client/data-entry/
 ├── name.example.csv             # 乘客名单模板
 ├── .env.example                 # 环境变量模板
 ├── requirements.txt             # Python 依赖
-├── operators.txt                # 干员名单
 ├── test_model_updater.py        # 模型更新测试
 ├── favicon.ico                  # 窗口图标
 └── models/
     ├── image_type.keras         # 画面类型识别模型
     ├── gacha10.keras            # 十连干员识别模型
+    ├── operators.txt            # 与十连模型配套的有序干员类别表
     └── manifest.json            # 本地模型版本清单
 ```
 
 `config.json`、`name.csv` 和 `.env` 属于本地用户配置，不会提交至 Git。程序首次启动时会根据对应模板自动创建这些文件。
 
-`models` 目录会被 Git 保留，但其中的模型和本地版本清单不会提交。客户端启动时会从服务器获取模型清单；下载完成并通过文件大小和 SHA-256 校验后，才会替换本地模型。服务器临时不可用时会继续使用已有模型；首次运行且本地没有模型时，需要能够连接模型服务。
+`models` 目录会被 Git 保留，但其中的模型、干员类别表和本地版本清单不会提交。客户端启动时会从服务器获取模型清单；下载完成并通过文件大小和 SHA-256 校验后，才会替换本地文件。`operators.txt` 与 `gacha10.keras` 配套，由模型训练项目维护并经服务器分发，不在客户端项目中单独维护。服务器临时不可用时会继续使用已有文件；首次运行且本地没有模型或类别表时，需要能够连接模型服务。
 
 #### 安装
 
@@ -148,6 +148,7 @@ python3 client/data-entry/main.py
 ```text
 image_type.keras
 gacha10.keras
+operators.txt
 ```
 
 ##### 截图为空白或内容不正确

@@ -75,7 +75,11 @@ class ModelUpdaterTests(unittest.TestCase):
         return httpx.Client(transport=httpx.MockTransport(handler))
 
     def test_downloads_missing_models_and_writes_manifest(self):
-        files = {"image_type": b"image-model", "gacha10": b"gacha-model"}
+        files = {
+            "image_type": b"image-model",
+            "gacha10": b"gacha-model",
+            "operators": "能天使\n推进之王\n".encode(),
+        }
         with tempfile.TemporaryDirectory() as temp_dir, self._client(files) as client:
             models_dir = pathlib.Path(temp_dir)
             results = update_models(
@@ -88,11 +92,18 @@ class ModelUpdaterTests(unittest.TestCase):
 
             self.assertEqual(results["image_type"].status, "downloaded")
             self.assertEqual((models_dir / "image_type.keras").read_bytes(), files["image_type"])
+            self.assertEqual(
+                (models_dir / "operators.txt").read_bytes(), files["operators"]
+            )
             manifest = json.loads((models_dir / "manifest.json").read_text("utf-8"))
             self.assertEqual(manifest["models"]["gacha10"]["version"], "2026.09.02.1")
 
     def test_matching_legacy_files_are_not_downloaded(self):
-        files = {"image_type": b"image-model", "gacha10": b"gacha-model"}
+        files = {
+            "image_type": b"image-model",
+            "gacha10": b"gacha-model",
+            "operators": "能天使\n推进之王\n".encode(),
+        }
         requests = []
 
         def handler(request):
@@ -110,7 +121,11 @@ class ModelUpdaterTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
-            for name, filename in {"image_type": "image_type.keras", "gacha10": "gacha10.keras"}.items():
+            for name, filename in {
+                "image_type": "image_type.keras",
+                "gacha10": "gacha10.keras",
+                "operators": "operators.txt",
+            }.items():
                 (models_dir / filename).write_bytes(files[name])
             with httpx.Client(transport=httpx.MockTransport(handler)) as client:
                 results = update_models(
@@ -124,7 +139,11 @@ class ModelUpdaterTests(unittest.TestCase):
             self.assertTrue(all(result.status == "current" for result in results.values()))
 
     def test_bad_download_does_not_replace_existing_model(self):
-        files = {"image_type": b"new-image", "gacha10": b"new-gacha"}
+        files = {
+            "image_type": b"new-image",
+            "gacha10": b"new-gacha",
+            "operators": "能天使\n推进之王\n".encode(),
+        }
         with tempfile.TemporaryDirectory() as temp_dir, self._client(
             files, corrupt_download=True
         ) as client:
@@ -142,6 +161,28 @@ class ModelUpdaterTests(unittest.TestCase):
                 )
 
             self.assertEqual(old_model.read_bytes(), b"old-image")
+
+    def test_invalid_operator_list_does_not_replace_existing_file(self):
+        files = {
+            "image_type": b"image-model",
+            "gacha10": b"gacha-model",
+            "operators": "能天使\n能天使\n".encode(),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, self._client(files) as client:
+            models_dir = pathlib.Path(temp_dir)
+            old_operators = models_dir / "operators.txt"
+            old_operators.write_text("推进之王\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "干员类别表存在重复项"):
+                update_models(
+                    "https://example.test/api/models/manifest",
+                    models_dir,
+                    "0.2.0",
+                    login_token="test-token",
+                    client=client,
+                )
+
+            self.assertEqual(old_operators.read_text(encoding="utf-8"), "推进之王\n")
 
 
 if __name__ == "__main__":

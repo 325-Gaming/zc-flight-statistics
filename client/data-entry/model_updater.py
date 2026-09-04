@@ -16,6 +16,7 @@ MANIFEST_SCHEMA_VERSION = 1
 DEFAULT_MODEL_FILES = {
     "image_type": "image_type.keras",
     "gacha10": "gacha10.keras",
+    "operators": "operators.txt",
 }
 MEBIBYTE = 1024 * 1024
 
@@ -43,6 +44,23 @@ def _sha256(path: pathlib.Path) -> str:
         for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validate_downloaded_file(path: pathlib.Path, destination_name: str) -> None:
+    if destination_name != "operators.txt":
+        return
+    try:
+        operator_names = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except UnicodeDecodeError as error:
+        raise ValueError("干员类别表不是有效的 UTF-8 文本") from error
+    if not operator_names:
+        raise ValueError("干员类别表不能为空")
+    if len(operator_names) != len(set(operator_names)):
+        raise ValueError("干员类别表存在重复项")
 
 
 def _format_download_status(
@@ -190,6 +208,7 @@ def _download_and_replace(
         actual_sha256 = digest.hexdigest()
         if actual_sha256 != expected_sha256:
             raise ValueError(f"模型 {destination.name} SHA-256 校验失败")
+        _validate_downloaded_file(pathlib.Path(temp_name), destination.name)
         os.replace(temp_name, destination)
         complete_line = _format_download_complete(
             destination.name,

@@ -250,9 +250,15 @@ for cls in type_id_name:
 operator_name_list = []
 operator_id_to_name = {}
 operator_name_to_id = {}
-with open(BASE_DIR / 'operators.txt', 'r', encoding='utf-8') as f:
+with open(BASE_DIR / 'models/operators.txt', 'r', encoding='utf-8') as f:
     for line in f.readlines():
-        operator_name_list.append(line.strip())
+        operator_name = line.strip()
+        if operator_name:
+            operator_name_list.append(operator_name)
+if len(operator_name_list) != len(set(operator_name_list)):
+    raise RuntimeError('下载的干员类别表存在重复项')
+if not operator_name_list:
+    raise RuntimeError('下载的干员类别表不能为空')
 for idx in range(len(operator_name_list)):
     opr = operator_name_list[idx]
     operator_id_to_name[idx] = opr
