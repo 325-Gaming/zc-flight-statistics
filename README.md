@@ -86,8 +86,8 @@ ZCFLIGHT_LOGIN_TOKEN=replace-with-your-token
 开发或自托管环境还可以在 `.env` 中覆盖以下接口地址：
 
 ```dotenv
-ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog_zc/models/manifest
-ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog_zc/current_user
+ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-manifest
+ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
 ```
 
 #### 运行配置

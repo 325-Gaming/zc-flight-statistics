@@ -104,14 +104,14 @@ print('当前活动 {}'.format(event_name))
 model_image_type_path = BASE_DIR / 'models/image_type.keras'
 model_gacha10_path = BASE_DIR / 'models/gacha10.keras'
 
-submit_gacha_log_api_url = 'https://yubo.run/api/gachalog_zc/submit'
+submit_gacha_log_api_url = 'https://yubo.run/api/gachalog-zc/submit'
 set_current_user_api_url = os.getenv(
     'ZCFLIGHT_CURRENT_USER_URL',
-    'https://yubo.run/api/gachalog_zc/current_user',
+    'https://yubo.run/api/gachalog-zc/set-current-user',
 )
 model_manifest_api_url = os.getenv(
     'ZCFLIGHT_MODEL_MANIFEST_URL',
-    'https://yubo.run/api/gachalog_zc/models/manifest',
+    'https://yubo.run/api/gachalog-zc/get-model-manifest',
 )
 # submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
 
