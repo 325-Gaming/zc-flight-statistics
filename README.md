@@ -22,6 +22,7 @@ Zc 航空抽卡数据录入客户端。程序会截取指定显示器，使用 T
 - 启动时自动检查、校验并更新识别模型
 - 支持在运行时修改活动、显示器、乘客名单和快捷键
 - 支持查看所选显示器的截图预览
+- 支持通过“统计 → 直播页面设置…”控制直播页面各项目的显示状态
 - 通过 `.env` 保存本地认证信息
 
 #### 目录结构
@@ -88,6 +89,8 @@ ZCFLIGHT_LOGIN_TOKEN=replace-with-your-token
 ```dotenv
 ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-manifest
 ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
+ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/get-page-display
+ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/set-page-display
 ```
 
 #### 运行配置
@@ -163,5 +166,11 @@ operators.txt
 
 - [x] 美化客户端窗口界面
 - [x] 实现从服务器获取最新版本模型的服务端与客户端
+- [ ] 取消全局键盘 Hook，改用操作系统的注册快捷键接口
+- [ ] 将识别与上传结果拆分执行，并将上传任务放入后台队列
+- [x] 客户端添加按钮，用于更新服务端中控制前端页面显示效果的记录
+- [ ] 客户端增加撤销等操作历史上传的抽卡记录功能
+- [ ] 客户端接入 羽bot 本体，实现浏览器回跳登录
+- [ ] 客户端允许多用户同时向同一卡池添加记录
 - [ ] 抽卡统计展示客户端
 - [ ] 完善客户端打包和发布流程

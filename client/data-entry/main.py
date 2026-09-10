@@ -28,6 +28,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from hotkeys import register_hotkeys
+from page_display_settings import (
+    PAGE_DISPLAY_ITEMS,
+    get_page_display_settings,
+    set_page_display_settings,
+)
 
 _name = 'Zc航空抽卡统计'
 _version = f'V{__version__}'
@@ -112,6 +117,14 @@ set_current_user_api_url = os.getenv(
 model_manifest_api_url = os.getenv(
     'ZCFLIGHT_MODEL_MANIFEST_URL',
     'https://yubo.run/api/gachalog-zc/get-model-manifest',
+)
+get_page_display_api_url = os.getenv(
+    'ZCFLIGHT_GET_PAGE_DISPLAY_URL',
+    'https://yubo.run/api/gachalog-zc/get-page-display',
+)
+set_page_display_api_url = os.getenv(
+    'ZCFLIGHT_SET_PAGE_DISPLAY_URL',
+    'https://yubo.run/api/gachalog-zc/set-page-display',
 )
 # submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
 
@@ -433,6 +446,7 @@ class SimpleApp:
         self.is_closing = False
         self.last_synced_user = None
         self.settings_window = None
+        self.page_display_settings_window = None
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -494,6 +508,10 @@ class SimpleApp:
         statistics_button = ttk.Menubutton(menu_bar, text="统计")
         statistics_button.pack(side=tk.LEFT)
         statistics_menu = self._create_menu(statistics_button)
+        statistics_menu.add_command(
+            label="直播页面设置…", command=self.open_page_display_settings
+        )
+        statistics_menu.add_separator()
         statistics_menu.add_command(label="查看统计", command=lambda: None)
         statistics_button.configure(menu=statistics_menu)
 
@@ -541,6 +559,103 @@ class SimpleApp:
         self.passenger_listbox.configure(yscrollcommand=scrollbar.set)
         self.passenger_listbox.bind("<<ListboxSelect>>", self.select_passenger)
         self.refresh_passenger_list()
+
+    def open_page_display_settings(self):
+        window = self.page_display_settings_window
+        if window is not None and window.winfo_exists():
+            window.lift()
+            window.focus_force()
+            return
+
+        try:
+            current_settings = get_page_display_settings(
+                client,
+                get_page_display_api_url,
+                login_token,
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            messagebox.showerror(
+                "无法打开直播页面设置",
+                f"从服务器读取页面项目显示状态失败：\n{error}",
+                parent=self.root,
+            )
+            return
+
+        window = tk.Toplevel(self.root)
+        self.page_display_settings_window = window
+        window.title("直播页面设置")
+        window.resizable(False, False)
+        window.configure(background="#f2f2f2")
+        window.transient(self.root)
+
+        content = ttk.Frame(window, padding=18)
+        content.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(
+            content,
+            text="勾选表示显示，不勾选表示隐藏。",
+        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+
+        variables = {}
+        for row, (key, label) in enumerate(PAGE_DISPLAY_ITEMS, start=1):
+            variable = tk.BooleanVar(value=current_settings[key])
+            variables[key] = variable
+            ttk.Checkbutton(
+                content,
+                text=label,
+                variable=variable,
+            ).grid(
+                row=row,
+                column=0,
+                sticky="w",
+                padx=(
+                    (24, 0)
+                    if key in {
+                        "is_bottom_info_left_visible",
+                        "is_bottom_info_right_visible",
+                    }
+                    else 0
+                ),
+                pady=4,
+            )
+
+        actions = ttk.Frame(content)
+        actions.grid(
+            row=len(PAGE_DISPLAY_ITEMS) + 1,
+            column=0,
+            sticky="e",
+            pady=(16, 0),
+        )
+        ttk.Button(actions, text="取消", command=window.destroy).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Button(
+            actions,
+            text="保存",
+            command=lambda: self.save_page_display_settings(variables, window),
+        ).pack(side=tk.LEFT)
+        window.protocol("WM_DELETE_WINDOW", window.destroy)
+
+    def save_page_display_settings(self, variables, window):
+        settings = {
+            key: variable.get()
+            for key, variable in variables.items()
+        }
+        try:
+            set_page_display_settings(
+                client,
+                set_page_display_api_url,
+                login_token,
+                settings,
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            messagebox.showerror(
+                "保存失败",
+                f"更新服务器页面项目显示状态失败：\n{error}",
+                parent=window,
+            )
+            return
+
+        window.destroy()
 
     def open_settings(self):
         if self.settings_window is not None and self.settings_window.winfo_exists():
@@ -849,7 +964,6 @@ class SimpleApp:
             self.refresh_passenger_list()
             self.new_user()
 
-        messagebox.showinfo("设置已保存", "新设置已经生效。", parent=window)
         window.destroy()
 
     def create_hotkey_listener(self, hotkeys):
