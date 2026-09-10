@@ -1,6 +1,4 @@
 httpx[http2]
-keyboard; sys_platform != "darwin"
-pyobjc-framework-Quartz; sys_platform == "darwin"
 mss
 numpy
 Pillow

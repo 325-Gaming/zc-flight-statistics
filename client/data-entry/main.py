@@ -15,6 +15,7 @@ import os
 import pathlib
 import requests
 import signal
+import sys
 import time
 
 from PIL import Image, ImageTk
@@ -447,6 +448,7 @@ class SimpleApp:
         self.last_synced_user = None
         self.settings_window = None
         self.page_display_settings_window = None
+        self.active_popup_menu = None
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -496,6 +498,28 @@ class SimpleApp:
         menu_bar = ttk.Frame(self.root, padding=(8, 4))
         menu_bar.grid(row=0, column=0, columnspan=2, sticky="ew")
 
+        if sys.platform == "darwin":
+            self._create_popup_menu_button(
+                menu_bar,
+                "文件",
+                (
+                    ("导入乘客名单…", self.import_passengers),
+                    ("设置…", self.open_settings),
+                    None,
+                    ("退出", self.on_closing),
+                ),
+            )
+            self._create_popup_menu_button(
+                menu_bar,
+                "统计",
+                (
+                    ("直播页面设置…", self.open_page_display_settings),
+                    None,
+                    ("查看统计", lambda: None),
+                ),
+            )
+            return
+
         file_button = ttk.Menubutton(menu_bar, text="文件")
         file_button.pack(side=tk.LEFT, padx=(0, 4))
         file_menu = self._create_menu(file_button)
@@ -514,6 +538,76 @@ class SimpleApp:
         statistics_menu.add_separator()
         statistics_menu.add_command(label="查看统计", command=lambda: None)
         statistics_button.configure(menu=statistics_menu)
+
+    def _create_popup_menu_button(self, parent, text, items):
+        button = ttk.Button(parent, text=text)
+        button.pack(side=tk.LEFT, padx=(0, 4))
+        button.configure(
+            command=lambda: self._toggle_popup_menu(button, items)
+        )
+        return button
+
+    def _toggle_popup_menu(self, button, items):
+        if self.active_popup_menu is not None:
+            is_same_menu = self.active_popup_menu.menu_button is button
+            self._close_popup_menu()
+            if is_same_menu:
+                return
+
+        popup = tk.Toplevel(self.root)
+        popup.menu_button = button
+        self.active_popup_menu = popup
+        popup.overrideredirect(True)
+        popup.transient(self.root)
+        popup.configure(background="#c8c8c8")
+
+        content = ttk.Frame(popup, padding=1)
+        content.pack(fill=tk.BOTH, expand=True)
+        for item in items:
+            if item is None:
+                ttk.Separator(content).pack(fill=tk.X, padx=4, pady=2)
+                continue
+            label, command = item
+            ttk.Button(
+                content,
+                text=label,
+                command=lambda action=command: self._run_popup_action(action),
+            ).pack(fill=tk.X)
+
+        popup.update_idletasks()
+        popup.geometry(
+            f"+{button.winfo_rootx()}+"
+            f"{button.winfo_rooty() + button.winfo_height()}"
+        )
+        popup.bind("<Escape>", lambda _event: self._close_popup_menu())
+        popup.bind(
+            "<FocusOut>",
+            lambda _event: self.root.after_idle(self._close_unfocused_popup_menu),
+        )
+        popup.focus_force()
+
+    def _close_unfocused_popup_menu(self):
+        popup = self.active_popup_menu
+        if popup is None:
+            return
+        focused_widget = popup.focus_get()
+        if focused_widget is None or not str(focused_widget).startswith(str(popup)):
+            self._close_popup_menu()
+
+    def _close_popup_menu(self):
+        popup = self.active_popup_menu
+        self.active_popup_menu = None
+        if popup is not None and popup.winfo_exists():
+            popup.destroy()
+
+    def _run_popup_action(self, action):
+        self._close_popup_menu()
+        self.root.after_idle(action)
+
+    def dispatch_hotkey(self, callback):
+        if sys.platform == "darwin":
+            self._close_popup_menu()
+        self.root.after(0, callback)
 
     def _create_menu(self, parent):
         return tk.Menu(
@@ -670,6 +764,10 @@ class SimpleApp:
             messagebox.showerror("无法打开设置", f"读取 config.json 失败：\n{error}")
             return
 
+        if self.hotkey_listener is not None:
+            self.hotkey_listener.stop()
+            self.hotkey_listener = None
+
         window = tk.Toplevel(self.root)
         self.settings_window = window
         window.title("设置")
@@ -755,7 +853,11 @@ class SimpleApp:
                 pady=(0, 5),
             )
 
-        ttk.Label(content, text="保存后立即生效；更换乘客名单会替换当前列表。").grid(
+        ttk.Label(
+            content,
+            text="设置窗口打开期间，全局快捷键无效；保存后立即生效。"
+            "更换乘客名单会替换当前列表。",
+        ).grid(
             row=len(settings) * 2,
             column=0,
             columnspan=2,
@@ -764,7 +866,11 @@ class SimpleApp:
         )
         actions = ttk.Frame(content)
         actions.grid(row=len(settings) * 2 + 1, column=0, columnspan=2, sticky="e")
-        ttk.Button(actions, text="取消", command=window.destroy).pack(
+        ttk.Button(
+            actions,
+            text="取消",
+            command=lambda: self.close_settings(window),
+        ).pack(
             side=tk.LEFT, padx=(0, 8)
         )
         ttk.Button(
@@ -772,7 +878,21 @@ class SimpleApp:
             text="保存",
             command=lambda: self.save_settings(entries, window),
         ).pack(side=tk.LEFT)
-        window.protocol("WM_DELETE_WINDOW", window.destroy)
+        window.protocol("WM_DELETE_WINDOW", lambda: self.close_settings(window))
+
+    def close_settings(self, window):
+        if self.hotkey_listener is None:
+            self.hotkey_listener = self.restore_hotkey_listener(
+                {
+                    "hotkey_gacha10": hotkey_gacha10,
+                    "hotkey_3x": hotkey_3x,
+                    "hotkey_4x": hotkey_4x,
+                    "hotkey_5x": hotkey_5x,
+                    "hotkey_6x": hotkey_6x,
+                }
+            )
+        self.settings_window = None
+        window.destroy()
 
     def update_monitor_selector(self, selector, selected_monitor_id=None):
         monitor_info = capture.get_monitor_info()
@@ -904,27 +1024,13 @@ class SimpleApp:
             ):
                 return
 
-        old_hotkeys = {
-            "hotkey_gacha10": hotkey_gacha10,
-            "hotkey_3x": hotkey_3x,
-            "hotkey_4x": hotkey_4x,
-            "hotkey_5x": hotkey_5x,
-            "hotkey_6x": hotkey_6x,
-        }
-        hotkeys_changed = new_hotkeys != old_hotkeys
-        old_listener = self.hotkey_listener
-        new_listener = old_listener
-        if hotkeys_changed:
-            if old_listener is not None:
-                old_listener.stop()
-            try:
-                new_listener = self.create_hotkey_listener(new_hotkeys)
-            except (RuntimeError, ValueError) as error:
-                self.hotkey_listener = self.restore_hotkey_listener(old_hotkeys)
-                messagebox.showerror(
-                    "无法保存", f"应用新快捷键失败：\n{error}", parent=window
-                )
-                return
+        try:
+            new_listener = self.create_hotkey_listener(new_hotkeys)
+        except (RuntimeError, ValueError) as error:
+            messagebox.showerror(
+                "无法保存", f"应用新快捷键失败：\n{error}", parent=window
+            )
+            return
 
         temporary_config_path = CONFIG_PATH.with_suffix(".json.tmp")
         try:
@@ -938,10 +1044,8 @@ class SimpleApp:
         except (OSError, json.JSONDecodeError) as error:
             if temporary_config_path.exists():
                 temporary_config_path.unlink()
-            if hotkeys_changed:
-                if new_listener is not None:
-                    new_listener.stop()
-                self.hotkey_listener = self.restore_hotkey_listener(old_hotkeys)
+            if new_listener is not None:
+                new_listener.stop()
             messagebox.showerror("保存失败", f"无法更新 config.json：\n{error}", parent=window)
             return
 
@@ -957,6 +1061,7 @@ class SimpleApp:
         config.update(values)
         self.event_name = event_name
         self.hotkey_listener = new_listener
+        self.settings_window = None
         self.update_hotkey_labels(new_hotkeys)
         if new_user_name_list is not None:
             self.user_name_list = new_user_name_list
@@ -986,7 +1091,8 @@ class SimpleApp:
             return None
         return register_hotkeys(
             dict(active_bindings),
-            dispatch=lambda callback: self.root.after(0, callback),
+            dispatch=self.dispatch_hotkey,
+            schedule=lambda callback, delay: self.root.after(delay, callback),
         )
 
     def restore_hotkey_listener(self, hotkeys):
