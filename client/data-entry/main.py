@@ -3,17 +3,14 @@ from tensorflow.keras import Sequential
 from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import Softmax
 
-import base64
 import datetime
 import httpx
-import io
 import json
 import mss
 from mss.exception import ScreenShotError
 import numpy as np
 import os
 import pathlib
-import requests
 import signal
 import sys
 import time
@@ -21,6 +18,7 @@ import time
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
 
+from gacha_upload import GachaUploadQueue
 from model_updater import ensure_latest_models
 from utils import expand_to_square, process_to_16_9
 from version import __version__
@@ -129,9 +127,8 @@ set_page_display_api_url = os.getenv(
 )
 # submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
 
-zcjpg = 'iVBORw0KGgoAAAANSUhEUgAAABUAAAAUCAIAAADtKeFkAAAEN0lEQVR4nC2TSW/bRgCFZyMpbiIpS7ZpLXZsJ0rdIgHaoAaaBAkQBG0PPRQ99Np/2FOLFggKpLcCadwli1dZsmTLErVxEckhhzOFg373d3gf3oMIISGEruvVanU+n6dpyrmQZcWyyjImSZokaWpYZVXXpiMP5vn+veazz9qLiVeVOEtmRAghy7JhGOPxOMsy+IFSSSZYJImvlkqOXV1bW1+GETf0RRi8fHW0COjuqpNq4PXpnEAIDcMIw5BSCiEEQihE2rDtWw13d6dlmeaKU3HX3dGw//OvL37/e8SFeNMZYMG+++becnRBSqVSURT/hwFQEGzX154/2n+4/2Bzs8EyigSUCdq0cVl5dnTR617PVF13a/b9vbqJHyAIIaVUCCEAQBDev7Pzw/fffv3l052dBkECAAEwKoQAkLQazeePv8AQyowZggwi7OzuoaIosiwDAAjOP9nZfvb4UUTzw+7lcW+8CBlAGlH0uMD/nlz++MtLgaStZp0C+NOrwz/+uUyXISmKol6vM8awEF8/fZJmyZKy6TS8uhhuNZruWs20zLdHx68O/kISGU0m21stO05P+5eHXe+rT7eJZVntdhthrDH20d3bkiJtuA2eZOdnx974KqNhmuWT6ezh5/umbZ10zrrDayfNojSfhFH3fYdgjI0PZFOPURr58/NOr1atzSbjJA7VkhSFoYRRsAzfHJ8kNE1yhomiadrR6bvrTRvFcdLvDxSl5DbqCAgCAWDs4PWf09m01dpst+9uuPVWszmbTKajUdV2BOcFFyzP45T1gwwBAK+uhssoFnlRVjVDLUlQVAytXqvJiLjrN3BWSAC4tapCsG2alCae50lqCbsNghDyfb/b7UpubTqb5ZQqhKzYNsFEkRVdNzVNS8KwrGs3SxEgDsLzszPPGz+5d5dNlzf+0yQ573U1SZwMzB234diOqqs5zXRN8/2A5cyxzJKucoh6/avJZNLtdRzHWt3Z7XgRYYwBCD3PG2iKrcoSltqqipPEn89/e3FANJXzgobBx3t7Jd3wvEmnP/CjZcOxZ4o9bzQJAAAhxDkfjryKaXDGgvm8opXWV1fkEul0zhjn7Tu3s0Kcvj86Ou8NRiPA8XwW9IYeXtWgqupFUQghIBDrK/Ytd2PNMjZWK63mRtWpsGVBcxbQ5XA27vb6R53e2XgqBJIkQjRrfbt94w8AwIpCcB6E0VT3V+xynBUHbw99P0gimiY0LTJ7xaJZPg4ixjnGiAvB4mjaeUcAgAghLAQTBRMgiJeLMCQI9gcX747PMwEAABVTV3Vt5vtBnAAAueBQQFOTHMsgqqokSSIEvzlinkdxMvf9StnYqK6ZRPOjWEBQtspUsOvF4qYngBggWzdsXWOUElnGCKn0hrTgIlrGlyOv1XDLmrzlbGuyPosWndFwmiRhmkIAVVW1DFOFOM9ZIfh/4pV4mHe0FIoAAAAASUVORK5CYII='
 
-client = httpx.Client(http2=True)
+client = httpx.Client(http2=True, timeout=15.0)
 
 class MultiMonitorCapture:
     def __init__(self):
@@ -285,48 +282,6 @@ with open(passenger_list_path, 'r', encoding='utf-8') as f:
 print('从乘客名单中加载到{}位乘客'.format(len(user_name_list)))
 
 
-def pil_to_base64(image, format='PNG'):
-    """
-    将PIL Image转换为base64字符串
-
-    Args:
-        image: PIL Image对象
-        format: 图片格式，如'PNG', 'JPEG'等
-
-    Returns:
-        base64编码的字符串
-    """
-    # 创建字节流缓冲区
-    buffer = io.BytesIO()
-
-    # 将图像保存到缓冲区
-    image.save(buffer, format=format)
-
-    # 获取字节数据并编码为base64
-    img_bytes = buffer.getvalue()
-    base64_string = base64.b64encode(img_bytes).decode('utf-8')
-
-    return base64_string
-
-def request_submit_gacha_result(event_name, nickname, count, gacha_index, character_list, pil_image):
-    t0 = time.time()
-    headers = {
-        "Authorization": f"Bearer {login_token}",
-        "Content-Type": "application/json",
-    }
-    # with requests.Session() as session:
-        # res = session.post(submit_gacha_log_api_url, headers=headers, json={
-    res = client.post(submit_gacha_log_api_url, headers=headers, json={
-            "event_name": event_name,
-            "nickname": nickname,
-            "count": count,
-            "gacha_index": gacha_index,
-            "character_json": json.dumps(character_list, ensure_ascii=False),
-            "image_b64": pil_to_base64(pil_image),
-        })
-    print('提交结果用时: {:.2f}s，服务器返回: {}'.format(time.time() - t0, res.text))
-
-
 def request_set_current_user(nickname):
     try:
         res = client.post(
@@ -362,17 +317,10 @@ def single_gacha(x):
     #     character_name = str(app.entry_6x_name.get())
     else:
         return
-    image = capture.capture_monitor(target_monitor_id, is_save=False)
-    image.thumbnail((im_w, im_h), Image.LANCZOS)
-    request_submit_gacha_result(
-        event_name=event_name,
-        nickname=app.entry_nickname.get(),
+    app.enqueue_gacha_result(
         count=1,
-        gacha_index=app.gacha_index,
         character_list=[character_name],
-        pil_image=image,
     )
-    app.gacha_index += 1
 
 
 def capture_and_predict():
@@ -419,15 +367,10 @@ def capture_and_predict():
             f.write(' '.join(result))
         text = ' '.join(result)
         app.label.config(text=text)
-        request_submit_gacha_result(
-            event_name=event_name,
-            nickname=app.entry_nickname.get(),
+        app.enqueue_gacha_result(
             count=10,
-            gacha_index=app.gacha_index,
             character_list=result,
-            pil_image=image_16_9.resize((int(iw / 8), int(ih / 8))),
         )
-        app.gacha_index += 10
         # return result
 
 
@@ -449,6 +392,13 @@ class SimpleApp:
         self.settings_window = None
         self.page_display_settings_window = None
         self.active_popup_menu = None
+        self.upload_queue = GachaUploadQueue(
+            client,
+            submit_gacha_log_api_url,
+            login_token,
+            on_success=self._upload_succeeded,
+            on_failure=self._upload_failed,
+        )
 
         # 设置窗口关闭事件处理
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -855,8 +805,13 @@ class SimpleApp:
 
         ttk.Label(
             content,
-            text="设置窗口打开期间，全局快捷键无效；保存后立即生效。"
-            "更换乘客名单会替换当前列表。",
+            text=(
+                "快捷键不区分大小写；Control/Ctrl、Cmd/Command 等写法等效。\n"
+                "单个按键会被系统全局占用，建议使用带修饰键的组合键。\n"
+                "设置窗口打开期间，全局快捷键无效；保存后立即生效。"
+                "更换乘客名单会替换当前列表。"
+            ),
+            justify=tk.LEFT,
         ).grid(
             row=len(settings) * 2,
             column=0,
@@ -1369,19 +1324,38 @@ class SimpleApp:
     def run(self):
         self.root.mainloop()
 
-
-    def purple_to_golden(self):
-        image_data = base64.b64decode(zcjpg)
-        image_buffer = io.BytesIO(image_data)
-        request_submit_gacha_result(
+    def enqueue_gacha_result(self, count, character_list):
+        gacha_index = self.gacha_index
+        self.upload_queue.submit(
             event_name=self.event_name,
             nickname=self.entry_nickname.get(),
-            count=10,
-            gacha_index=self.gacha_index,
-            character_list=['断罪者' for i in range(10)],
-            pil_image=Image.open(image_buffer),
+            count=count,
+            gacha_index=gacha_index,
+            character_list=character_list,
         )
-        self.gacha_index += 10
+        self.gacha_index += count
+        print(f'上传任务已加入队列: 第 {gacha_index} 抽，共 {count} 抽')
+
+    @staticmethod
+    def _upload_succeeded(task, response):
+        print(
+            f'上传成功: 第 {task.gacha_index} 抽，共 {task.count} 抽，'
+            f'服务器返回: {response.text}'
+        )
+
+    @staticmethod
+    def _upload_failed(task, error):
+        print(
+            f'上传失败: 第 {task.gacha_index} 抽，共 {task.count} 抽，'
+            f'错误: {error}'
+        )
+
+
+    def purple_to_golden(self):
+        self.enqueue_gacha_result(
+            count=10,
+            character_list=['断罪者' for i in range(10)],
+        )
 
     def on_closing(self):
         """窗口关闭时的清理工作"""
@@ -1392,6 +1366,10 @@ class SimpleApp:
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
             self.hotkey_listener = None
+        pending_count = self.upload_queue.pending_count
+        if pending_count:
+            print(f'正在等待 {pending_count} 个上传任务完成...')
+        self.upload_queue.close(wait=True)
         capture.sct.close()
         client.close()
         self.root.destroy()
