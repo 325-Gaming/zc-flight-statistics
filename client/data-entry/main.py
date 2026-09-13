@@ -11,14 +11,22 @@ from mss.exception import ScreenShotError
 import numpy as np
 import os
 import pathlib
+import queue
 import signal
 import sys
+import threading
 import time
 
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
 
-from gacha_upload import GachaUploadQueue
+from gacha_history import get_gacha_history
+from gacha_upload import (
+    GachaMoveTask,
+    GachaStateTask,
+    GachaUploadQueue,
+    GachaUploadTask,
+)
 from model_updater import ensure_latest_models
 from utils import expand_to_square, process_to_16_9
 from version import __version__
@@ -124,6 +132,22 @@ get_page_display_api_url = os.getenv(
 set_page_display_api_url = os.getenv(
     'ZCFLIGHT_SET_PAGE_DISPLAY_URL',
     'https://yubo.run/api/gachalog-zc/set-page-display',
+)
+gacha_history_api_url = os.getenv(
+    'ZCFLIGHT_GACHA_HISTORY_URL',
+    'https://yubo.run/api/gachalog-zc/history',
+)
+move_gacha_log_api_url = os.getenv(
+    'ZCFLIGHT_MOVE_GACHA_URL',
+    'https://yubo.run/api/gachalog-zc/move-record',
+)
+revoke_gacha_log_api_url = os.getenv(
+    'ZCFLIGHT_REVOKE_GACHA_URL',
+    'https://yubo.run/api/gachalog-zc/revoke',
+)
+restore_gacha_log_api_url = os.getenv(
+    'ZCFLIGHT_RESTORE_GACHA_URL',
+    'https://yubo.run/api/gachalog-zc/restore',
 )
 # submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
 
@@ -391,13 +415,21 @@ class SimpleApp:
         self.last_synced_user = None
         self.settings_window = None
         self.page_display_settings_window = None
+        self.history_window = None
+        self.history_records = {}
+        self.history_load_id = 0
+        self.undo_request_in_progress = False
+        self.background_results = queue.Queue()
         self.active_popup_menu = None
         self.upload_queue = GachaUploadQueue(
             client,
             submit_gacha_log_api_url,
             login_token,
-            on_success=self._upload_succeeded,
-            on_failure=self._upload_failed,
+            move_url=move_gacha_log_api_url,
+            restore_url=restore_gacha_log_api_url,
+            revoke_url=revoke_gacha_log_api_url,
+            on_success=self._queue_task_succeeded,
+            on_failure=self._queue_task_failed,
         )
 
         # 设置窗口关闭事件处理
@@ -408,6 +440,9 @@ class SimpleApp:
         self._create_menu_bar()
         self._create_passenger_sidebar()
         self._create_main_panel()
+        self.root.bind_all("<Control-z>", self.undo_last_gacha)
+        self.root.bind_all("<Command-z>", self.undo_last_gacha)
+        self.root.after(100, self._process_background_results)
 
         self.new_user()
 
@@ -461,6 +496,14 @@ class SimpleApp:
             )
             self._create_popup_menu_button(
                 menu_bar,
+                "操作",
+                (
+                    ("撤销上一条", self.undo_last_gacha),
+                    ("抽卡记录…", self.open_gacha_history),
+                ),
+            )
+            self._create_popup_menu_button(
+                menu_bar,
                 "统计",
                 (
                     ("直播页面设置…", self.open_page_display_settings),
@@ -478,6 +521,17 @@ class SimpleApp:
         file_menu.add_separator()
         file_menu.add_command(label="退出", command=self.on_closing)
         file_button.configure(menu=file_menu)
+
+        action_button = ttk.Menubutton(menu_bar, text="操作")
+        action_button.pack(side=tk.LEFT, padx=(0, 4))
+        action_menu = self._create_menu(action_button)
+        action_menu.add_command(
+            label="撤销上一条",
+            accelerator="Ctrl+Z",
+            command=self.undo_last_gacha,
+        )
+        action_menu.add_command(label="抽卡记录…", command=self.open_gacha_history)
+        action_button.configure(menu=action_menu)
 
         statistics_button = ttk.Menubutton(menu_bar, text="统计")
         statistics_button.pack(side=tk.LEFT)
@@ -603,6 +657,528 @@ class SimpleApp:
         self.passenger_listbox.configure(yscrollcommand=scrollbar.set)
         self.passenger_listbox.bind("<<ListboxSelect>>", self.select_passenger)
         self.refresh_passenger_list()
+
+    def open_gacha_history(self):
+        window = self.history_window
+        if window is not None and window.winfo_exists():
+            self._sync_history_current_passenger()
+            window.lift()
+            window.focus_force()
+            return
+
+        current_nickname = self.entry_nickname.get().strip()
+        window = tk.Toplevel(self.root)
+        self.history_window = window
+        self.history_current_nickname = current_nickname
+        window.title("抽卡记录")
+        window.geometry("1000x520")
+        window.minsize(760, 400)
+        window.configure(background="#f2f2f2")
+        window.transient(self.root)
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(0, weight=1)
+
+        content = ttk.Frame(window, padding=16)
+        content.grid(row=0, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(1, weight=1)
+
+        toolbar = ttk.Frame(content)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        ttk.Label(toolbar, text="查看范围：").pack(side=tk.LEFT)
+        current_filter_label = f"当前乘客：{current_nickname}"
+        self.history_all_filter_label = "全部乘客（当前活动）"
+        self.history_filter_var = tk.StringVar(value=current_filter_label)
+        self.history_filter_mode = "current"
+        self.history_filter_nickname = current_nickname
+        selector = ttk.Menubutton(
+            toolbar,
+            textvariable=self.history_filter_var,
+            width=30,
+        )
+        selector.pack(side=tk.LEFT, padx=(0, 8))
+        self.history_filter_selector = selector
+        self.history_filter_menu = self._create_menu(selector)
+        selector.configure(menu=self.history_filter_menu)
+        self._rebuild_history_filter_menu()
+        ttk.Button(
+            toolbar,
+            text="刷新",
+            command=self.refresh_gacha_history,
+        ).pack(side=tk.LEFT)
+
+        table = ttk.Frame(content)
+        table.grid(row=1, column=0, sticky="nsew")
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(0, weight=1)
+        columns = (
+            "record_id",
+            "nickname",
+            "sequence_no",
+            "position",
+            "result",
+            "created_at",
+            "status",
+        )
+        self.history_tree = ttk.Treeview(
+            table,
+            columns=columns,
+            show="headings",
+            selectmode="browse",
+        )
+        headings = {
+            "record_id": "记录 ID",
+            "nickname": "乘客",
+            "sequence_no": "记录序号",
+            "position": "抽数",
+            "result": "抽卡结果",
+            "created_at": "上传时间",
+            "status": "状态",
+        }
+        widths = {
+            "record_id": 75,
+            "nickname": 120,
+            "sequence_no": 75,
+            "position": 80,
+            "result": 315,
+            "created_at": 165,
+            "status": 75,
+        }
+        for column in columns:
+            self.history_tree.heading(column, text=headings[column])
+            self.history_tree.column(
+                column,
+                width=widths[column],
+                minwidth=60,
+                stretch=column == "result",
+            )
+        self.history_tree.grid(row=0, column=0, sticky="nsew")
+        self.history_tree.bind(
+            "<<TreeviewSelect>>",
+            self._update_history_action_buttons,
+        )
+        scrollbar = ttk.Scrollbar(
+            table,
+            orient=tk.VERTICAL,
+            command=self.history_tree.yview,
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.history_tree.configure(yscrollcommand=scrollbar.set)
+
+        footer = ttk.Frame(content)
+        footer.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self.history_status_label = ttk.Label(footer, text="")
+        self.history_status_label.grid(
+            row=0,
+            column=0,
+            columnspan=7,
+            sticky="w",
+            pady=(0, 8),
+        )
+        ttk.Label(footer, text="将所选记录：").grid(
+            row=1,
+            column=0,
+            sticky="w",
+        )
+        self.history_revoke_button = ttk.Button(
+            footer,
+            text="撤销",
+            command=lambda: self.change_selected_history_state(True),
+            state=tk.DISABLED,
+        )
+        self.history_revoke_button.grid(row=1, column=1, sticky="ew", padx=(8, 0))
+        self.history_restore_button = ttk.Button(
+            footer,
+            text="恢复",
+            command=lambda: self.change_selected_history_state(False),
+            state=tk.DISABLED,
+        )
+        self.history_restore_button.grid(row=1, column=2, sticky="ew", padx=(8, 0))
+        self.history_move_first_button = ttk.Button(
+            footer,
+            text="移至最前",
+            command=lambda: self.move_selected_history_record("first"),
+            state=tk.DISABLED,
+        )
+        self.history_move_first_button.grid(
+            row=2,
+            column=1,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(8, 0),
+        )
+        self.history_move_previous_button = ttk.Button(
+            footer,
+            text="与前一条交换位置",
+            command=lambda: self.move_selected_history_record("previous"),
+            state=tk.DISABLED,
+        )
+        self.history_move_previous_button.grid(
+            row=2,
+            column=2,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(8, 0),
+        )
+        self.history_move_next_button = ttk.Button(
+            footer,
+            text="与后一条交换位置",
+            command=lambda: self.move_selected_history_record("next"),
+            state=tk.DISABLED,
+        )
+        self.history_move_next_button.grid(
+            row=2,
+            column=3,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(8, 0),
+        )
+        self.history_move_last_button = ttk.Button(
+            footer,
+            text="移至最后",
+            command=lambda: self.move_selected_history_record("last"),
+            state=tk.DISABLED,
+        )
+        self.history_move_last_button.grid(
+            row=2,
+            column=4,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(8, 0),
+        )
+        footer.columnconfigure(5, weight=1)
+        ttk.Button(
+            footer,
+            text="关闭",
+            command=self.close_gacha_history,
+        ).grid(row=2, column=6, padx=(8, 0), pady=(8, 0))
+
+        window.protocol("WM_DELETE_WINDOW", self.close_gacha_history)
+        self.refresh_gacha_history()
+
+    def close_gacha_history(self):
+        self.history_load_id += 1
+        window = self.history_window
+        self.history_window = None
+        self.history_records = {}
+        if window is not None and window.winfo_exists():
+            window.destroy()
+
+    def _select_history_filter(self, mode, nickname=None):
+        self.history_filter_mode = mode
+        if mode == "current":
+            nickname = self.history_current_nickname
+            label = f"当前乘客：{nickname}"
+        elif mode == "all":
+            nickname = None
+            label = self.history_all_filter_label
+        else:
+            label = nickname
+        self.history_filter_nickname = nickname
+        self.history_filter_var.set(label)
+        self.refresh_gacha_history()
+
+    def _rebuild_history_filter_menu(self):
+        menu = self.history_filter_menu
+        menu.delete(0, tk.END)
+        menu.add_command(
+            label=f"当前乘客：{self.history_current_nickname}",
+            command=lambda: self._select_history_filter("current"),
+        )
+        menu.add_command(
+            label=self.history_all_filter_label,
+            command=lambda: self._select_history_filter("all"),
+        )
+        menu.add_separator()
+        for passenger_name in self.user_name_list:
+            menu.add_command(
+                label=passenger_name,
+                command=lambda name=passenger_name: self._select_history_filter(
+                    "passenger",
+                    name,
+                ),
+            )
+
+    def _sync_history_current_passenger(self):
+        window = self.history_window
+        if window is None or not window.winfo_exists():
+            return
+        self.history_current_nickname = self.entry_nickname.get().strip()
+        self._rebuild_history_filter_menu()
+        if self.history_filter_mode == "current":
+            self.history_filter_nickname = self.history_current_nickname
+            self.history_filter_var.set(
+                f"当前乘客：{self.history_current_nickname}"
+            )
+            self.refresh_gacha_history()
+
+    def _selected_history_nickname(self):
+        return self.history_filter_nickname
+
+    def refresh_gacha_history(self):
+        window = self.history_window
+        if window is None or not window.winfo_exists():
+            return
+        nickname = self._selected_history_nickname()
+        self.history_load_id += 1
+        load_id = self.history_load_id
+        self.history_status_label.configure(text="正在读取抽卡记录…")
+        self.history_revoke_button.configure(state=tk.DISABLED)
+        self.history_restore_button.configure(state=tk.DISABLED)
+        self.history_move_first_button.configure(state=tk.DISABLED)
+        self.history_move_previous_button.configure(state=tk.DISABLED)
+        self.history_move_next_button.configure(state=tk.DISABLED)
+        self.history_move_last_button.configure(state=tk.DISABLED)
+        threading.Thread(
+            target=self._load_gacha_history,
+            args=(load_id, nickname),
+            name="gacha-history",
+            daemon=True,
+        ).start()
+
+    def _load_gacha_history(self, load_id, nickname):
+        try:
+            records = get_gacha_history(
+                client,
+                gacha_history_api_url,
+                login_token,
+                self.event_name,
+                nickname=nickname,
+            )
+        except (httpx.HTTPError, RuntimeError, ValueError) as request_error:
+            records = None
+        else:
+            request_error = None
+        self.background_results.put(
+            ("history", load_id, nickname, records, request_error)
+        )
+
+    def _show_gacha_history_result(self, load_id, nickname, records, error):
+        window = self.history_window
+        if (
+            load_id != self.history_load_id
+            or window is None
+            or not window.winfo_exists()
+        ):
+            return
+        if error is not None:
+            self.history_status_label.configure(text=f"读取失败：{error}")
+            return
+
+        self.history_records = {record.record_id: record for record in records}
+        self.history_tree.delete(*self.history_tree.get_children())
+        if nickname == self.entry_nickname.get().strip():
+            self.gacha_index = 1 + sum(
+                record.count for record in records if not record.is_revoked
+            )
+        positions = {}
+        record_positions = {}
+        for record in records:
+            position = positions.get(record.nickname, 1)
+            if record.is_revoked:
+                record_positions[record.record_id] = "—"
+            else:
+                record_positions[record.record_id] = position
+                positions[record.nickname] = position + record.count
+
+        for record in records:
+            created_at = record.created_at.replace("T", " ")[:19]
+            self.history_tree.insert(
+                "",
+                tk.END,
+                iid=str(record.record_id),
+                values=(
+                    record.record_id,
+                    record.nickname,
+                    record.sequence_no,
+                    record_positions[record.record_id],
+                    " ".join(record.character_list),
+                    created_at,
+                    "已撤销" if record.is_revoked else "有效",
+                ),
+            )
+        if records:
+            self.history_tree.see(str(records[-1].record_id))
+        range_text = "全部乘客" if nickname is None else nickname
+        self.history_status_label.configure(
+            text=f"{range_text}：共 {len(records)} 条记录"
+        )
+
+    def _update_history_action_buttons(self, _event=None):
+        selection = self.history_tree.selection()
+        if not selection:
+            self.history_revoke_button.configure(state=tk.DISABLED)
+            self.history_restore_button.configure(state=tk.DISABLED)
+            self.history_move_first_button.configure(state=tk.DISABLED)
+            self.history_move_previous_button.configure(state=tk.DISABLED)
+            self.history_move_next_button.configure(state=tk.DISABLED)
+            self.history_move_last_button.configure(state=tk.DISABLED)
+            return
+        record = self.history_records.get(int(selection[0]))
+        if record is None:
+            return
+        self.history_revoke_button.configure(
+            state=tk.DISABLED if record.is_revoked else tk.NORMAL
+        )
+        self.history_restore_button.configure(
+            state=tk.NORMAL if record.is_revoked else tk.DISABLED
+        )
+        sibling_records = sorted(
+            (
+                item
+                for item in self.history_records.values()
+                if item.nickname == record.nickname
+            ),
+            key=lambda item: item.sequence_no,
+        )
+        selected_index = next(
+            index
+            for index, item in enumerate(sibling_records)
+            if item.record_id == record.record_id
+        )
+        has_previous = selected_index > 0
+        has_next = selected_index < len(sibling_records) - 1
+        self.history_move_first_button.configure(
+            state=tk.NORMAL if has_previous else tk.DISABLED
+        )
+        self.history_move_previous_button.configure(
+            state=tk.NORMAL if has_previous else tk.DISABLED
+        )
+        self.history_move_next_button.configure(
+            state=tk.NORMAL if has_next else tk.DISABLED
+        )
+        self.history_move_last_button.configure(
+            state=tk.NORMAL if has_next else tk.DISABLED
+        )
+
+    def change_selected_history_state(self, is_revoked):
+        selection = self.history_tree.selection()
+        if not selection:
+            return
+        record = self.history_records.get(int(selection[0]))
+        if record is None or record.is_revoked == is_revoked:
+            return
+        if is_revoked and not messagebox.askyesno(
+            "撤销抽卡记录",
+            f"确定撤销 {record.nickname} 的这条 {record.count} 抽记录吗？",
+            parent=self.history_window,
+        ):
+            return
+        if is_revoked:
+            self.upload_queue.revoke(self.event_name, record.record_id)
+            action = "撤销"
+        else:
+            self.upload_queue.restore(self.event_name, record.record_id)
+            action = "恢复"
+        self.history_status_label.configure(text=f"{action}操作已加入队列…")
+        self.history_revoke_button.configure(state=tk.DISABLED)
+        self.history_restore_button.configure(state=tk.DISABLED)
+        self.history_move_first_button.configure(state=tk.DISABLED)
+        self.history_move_previous_button.configure(state=tk.DISABLED)
+        self.history_move_next_button.configure(state=tk.DISABLED)
+        self.history_move_last_button.configure(state=tk.DISABLED)
+
+    def move_selected_history_record(self, action):
+        selection = self.history_tree.selection()
+        if not selection:
+            return
+        record = self.history_records.get(int(selection[0]))
+        if record is None:
+            return
+        self.upload_queue.move(self.event_name, record.record_id, action)
+        action_labels = {
+            "first": "移至最前",
+            "last": "移至最后",
+            "previous": "与前一条交换位置",
+            "next": "与后一条交换位置",
+        }
+        self.history_status_label.configure(
+            text=f"{action_labels[action]}操作已加入队列…"
+        )
+        self.history_revoke_button.configure(state=tk.DISABLED)
+        self.history_restore_button.configure(state=tk.DISABLED)
+        self.history_move_first_button.configure(state=tk.DISABLED)
+        self.history_move_previous_button.configure(state=tk.DISABLED)
+        self.history_move_next_button.configure(state=tk.DISABLED)
+        self.history_move_last_button.configure(state=tk.DISABLED)
+
+    def undo_last_gacha(self, _event=None):
+        if _event is not None:
+            focused_widget = self.root.focus_get()
+            if focused_widget is not None and focused_widget.winfo_class() in {
+                "Entry",
+                "Text",
+                "TEntry",
+            }:
+                return None
+        if self.undo_request_in_progress:
+            return "break"
+        nickname = self.entry_nickname.get().strip()
+        if not nickname:
+            messagebox.showwarning("无法撤销", "当前乘客昵称不能为空。")
+            return "break"
+        self.undo_request_in_progress = True
+        threading.Thread(
+            target=self._load_last_gacha_for_undo,
+            args=(nickname,),
+            name="gacha-undo",
+            daemon=True,
+        ).start()
+        return "break"
+
+    def _load_last_gacha_for_undo(self, nickname):
+        try:
+            records = get_gacha_history(
+                client,
+                gacha_history_api_url,
+                login_token,
+                self.event_name,
+                nickname=nickname,
+            )
+        except (httpx.HTTPError, RuntimeError, ValueError) as request_error:
+            record = None
+        else:
+            request_error = None
+            record = next(
+                (item for item in reversed(records) if not item.is_revoked),
+                None,
+            )
+        self.background_results.put(
+            ("undo", nickname, record, request_error)
+        )
+
+    def _process_background_results(self):
+        while True:
+            try:
+                result = self.background_results.get_nowait()
+            except queue.Empty:
+                break
+            result_type, *payload = result
+            if result_type == "history":
+                self._show_gacha_history_result(*payload)
+            elif result_type == "undo":
+                self._confirm_undo_last_gacha(*payload)
+            elif result_type == "queue":
+                self._after_queue_task_finished(*payload)
+        if not self.is_closing:
+            self.root.after(100, self._process_background_results)
+
+    def _confirm_undo_last_gacha(self, nickname, record, error):
+        self.undo_request_in_progress = False
+        if nickname != self.entry_nickname.get().strip():
+            return
+        if error is not None:
+            messagebox.showerror("撤销失败", f"读取抽卡记录失败：\n{error}")
+            return
+        if record is None:
+            messagebox.showinfo("无法撤销", f"{nickname} 没有可撤销的抽卡记录。")
+            return
+        if not messagebox.askyesno(
+            "撤销上一条抽卡记录",
+            f"确定撤销 {nickname} 最近上传的 {record.count} 抽记录吗？",
+        ):
+            return
+        self.upload_queue.revoke(self.event_name, record.record_id)
 
     def open_page_display_settings(self):
         window = self.page_display_settings_window
@@ -1275,6 +1851,7 @@ class SimpleApp:
             state=tk.DISABLED if self.user_id == 0 else tk.NORMAL
         )
         self.sync_current_user()
+        self._sync_history_current_passenger()
 
     def sync_current_user(self, _event=None):
         current_user_name = self.entry_nickname.get().strip()
@@ -1295,6 +1872,7 @@ class SimpleApp:
         self.passenger_listbox.selection_set(self.user_id)
         self.passenger_listbox.see(self.user_id)
         self.sync_current_user()
+        self._sync_history_current_passenger()
 
     def new_user(self):
         next_user_id = self.user_id + 1
@@ -1336,19 +1914,44 @@ class SimpleApp:
         self.gacha_index += count
         print(f'上传任务已加入队列: 第 {gacha_index} 抽，共 {count} 抽')
 
-    @staticmethod
-    def _upload_succeeded(task, response):
-        print(
-            f'上传成功: 第 {task.gacha_index} 抽，共 {task.count} 抽，'
-            f'服务器返回: {response.text}'
-        )
+    def _queue_task_succeeded(self, task, response):
+        if isinstance(task, GachaUploadTask):
+            print(
+                f'上传成功: 第 {task.gacha_index} 抽，共 {task.count} 抽，'
+                f'服务器返回: {response.text}'
+            )
+        elif isinstance(task, GachaStateTask):
+            action = '撤销' if task.is_revoked else '恢复'
+            print(f'{action}成功: 记录 {task.record_id}，服务器返回: {response.text}')
+        else:
+            print(
+                f'调整顺序成功: 记录 {task.record_id}，操作 {task.action}，'
+                f'服务器返回: {response.text}'
+            )
+        self.background_results.put(("queue", task, None))
 
-    @staticmethod
-    def _upload_failed(task, error):
-        print(
-            f'上传失败: 第 {task.gacha_index} 抽，共 {task.count} 抽，'
-            f'错误: {error}'
-        )
+    def _queue_task_failed(self, task, error):
+        if isinstance(task, GachaUploadTask):
+            print(
+                f'上传失败: 第 {task.gacha_index} 抽，共 {task.count} 抽，'
+                f'错误: {error}'
+            )
+        elif isinstance(task, GachaStateTask):
+            action = '撤销' if task.is_revoked else '恢复'
+            print(f'{action}失败: 记录 {task.record_id}，错误: {error}')
+        else:
+            print(f'调整顺序失败: 记录 {task.record_id}，错误: {error}')
+        self.background_results.put(("queue", task, error))
+
+    def _after_queue_task_finished(self, task, error):
+        if error is not None and isinstance(task, GachaStateTask):
+            action = '撤销' if task.is_revoked else '恢复'
+            messagebox.showerror(f'{action}失败', f'{action}抽卡记录失败：\n{error}')
+        elif error is not None and isinstance(task, GachaMoveTask):
+            messagebox.showerror("调整顺序失败", f"调整抽卡记录顺序失败：\n{error}")
+        window = self.history_window
+        if window is not None and window.winfo_exists():
+            self.refresh_gacha_history()
 
 
     def purple_to_golden(self):

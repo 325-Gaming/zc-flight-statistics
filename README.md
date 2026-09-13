@@ -91,6 +91,10 @@ ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-mani
 ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
 ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/get-page-display
 ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/set-page-display
+ZCFLIGHT_GACHA_HISTORY_URL=http://localhost:8000/api/gachalog-zc/history
+ZCFLIGHT_MOVE_GACHA_URL=http://localhost:8000/api/gachalog-zc/move-record
+ZCFLIGHT_REVOKE_GACHA_URL=http://localhost:8000/api/gachalog-zc/revoke
+ZCFLIGHT_RESTORE_GACHA_URL=http://localhost:8000/api/gachalog-zc/restore
 ```
 
 #### 运行配置
@@ -129,6 +133,8 @@ python3 client/data-entry/main.py
 2. 在界面中确认当前乘客。
 3. 使用界面按钮或配置的全局快捷键录入抽卡结果。
 4. 每位乘客结束后，点击“下一位乘客”重置抽卡序号；也可以使用“新乘客”和“重命名”维护名单。
+5. 通过“操作 → 抽卡记录…”查看当前活动的上传记录。窗口默认只请求当前乘客的记录；查看范围菜单还可以选择乘客名单中的任意乘客，只有主动切换到“全部乘客（当前活动）”后才会请求当前活动全部记录。
+6. 在抽卡记录窗口中可以撤销、恢复记录，或将所选记录移至最前、移至最后、与前一条交换位置、与后一条交换位置；也可以使用“操作 → 撤销上一条”或 `Ctrl+Z`（macOS 可用 `Command+Z`）撤销当前乘客最近的有效记录。
 
 #### 系统权限
 
@@ -169,8 +175,10 @@ operators.txt
 - [x] 取消全局键盘 Hook，改用操作系统的注册快捷键接口
 - [x] 将识别与上传结果拆分执行，并将上传任务放入后台队列
 - [x] 客户端添加按钮，用于更新服务端中控制前端页面显示效果的记录
-- [ ] 客户端增加撤销等操作历史上传的抽卡记录功能
+- [x] 客户端增加撤销等操作历史上传的抽卡记录功能
 - [ ] 客户端接入 羽bot 本体，实现浏览器回跳登录
 - [ ] 客户端允许多用户同时向同一卡池添加记录
 - [ ] 抽卡统计展示客户端
+- [ ] 前端页面增加更多样式
+- [ ] 客户端增加切换前端页面样式功能
 - [ ] 完善客户端打包和发布流程

@@ -2,6 +2,7 @@ import json
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 
 import httpx
@@ -14,6 +15,21 @@ class GachaUploadTask:
     count: int
     gacha_index: int
     character_list: tuple[str, ...]
+    request_id: str
+
+
+@dataclass(frozen=True)
+class GachaStateTask:
+    event_name: str
+    record_id: int
+    is_revoked: bool
+
+
+@dataclass(frozen=True)
+class GachaMoveTask:
+    event_name: str
+    record_id: int
+    action: str
 
 
 class GachaUploadQueue:
@@ -23,6 +39,9 @@ class GachaUploadQueue:
         url,
         login_token,
         *,
+        move_url=None,
+        restore_url=None,
+        revoke_url=None,
         max_attempts=3,
         retry_delay=0.5,
         on_success=None,
@@ -33,6 +52,9 @@ class GachaUploadQueue:
         self.client = client
         self.url = url
         self.login_token = login_token
+        self.move_url = move_url
+        self.restore_url = restore_url
+        self.revoke_url = revoke_url
         self.max_attempts = max_attempts
         self.retry_delay = retry_delay
         self.on_success = on_success
@@ -62,12 +84,51 @@ class GachaUploadQueue:
             count=count,
             gacha_index=gacha_index,
             character_list=tuple(character_list),
+            request_id=str(uuid.uuid4()),
         )
+        self._put(task)
+        return task
+
+    def restore(self, event_name, record_id):
+        if self.restore_url is None:
+            raise RuntimeError("恢复接口尚未配置")
+        task = GachaStateTask(
+            event_name=event_name,
+            record_id=record_id,
+            is_revoked=False,
+        )
+        self._put(task)
+        return task
+
+    def revoke(self, event_name, record_id):
+        if self.revoke_url is None:
+            raise RuntimeError("撤销接口尚未配置")
+        task = GachaStateTask(
+            event_name=event_name,
+            record_id=record_id,
+            is_revoked=True,
+        )
+        self._put(task)
+        return task
+
+    def move(self, event_name, record_id, action):
+        if self.move_url is None:
+            raise RuntimeError("记录排序接口尚未配置")
+        if action not in {"first", "last", "previous", "next"}:
+            raise ValueError("不支持的记录排序操作")
+        task = GachaMoveTask(
+            event_name=event_name,
+            record_id=record_id,
+            action=action,
+        )
+        self._put(task)
+        return task
+
+    def _put(self, task):
         with self._lock:
             if self._closed:
                 raise RuntimeError("上传队列已经关闭")
             self._queue.put(task)
-        return task
 
     def close(self, wait=True):
         with self._lock:
@@ -100,13 +161,9 @@ class GachaUploadQueue:
         last_error = None
         for attempt in range(1, self.max_attempts + 1):
             try:
-                response = self.client.post(
-                    self.url,
-                    headers={
-                        "Authorization": f"Bearer {self.login_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
+                if isinstance(task, GachaUploadTask):
+                    url = self.url
+                    payload = {
                         "event_name": task.event_name,
                         "nickname": task.nickname,
                         "count": task.count,
@@ -115,7 +172,28 @@ class GachaUploadQueue:
                             task.character_list,
                             ensure_ascii=False,
                         ),
+                        "request_id": task.request_id,
+                    }
+                elif isinstance(task, GachaStateTask):
+                    url = self.revoke_url if task.is_revoked else self.restore_url
+                    payload = {
+                        "event_name": task.event_name,
+                        "record_id": task.record_id,
+                    }
+                else:
+                    url = self.move_url
+                    payload = {
+                        "event_name": task.event_name,
+                        "record_id": task.record_id,
+                        "action": task.action,
+                    }
+                response = self.client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.login_token}",
+                        "Content-Type": "application/json",
                     },
+                    json=payload,
                 )
                 response.raise_for_status()
             except httpx.HTTPStatusError as error:
