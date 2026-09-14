@@ -40,6 +40,11 @@ from page_display_settings import (
     get_page_display_settings,
     set_page_display_settings,
 )
+from page_style_settings import (
+    DEFAULT_PAGE_STYLE,
+    get_available_page_styles,
+    select_available_page_style,
+)
 
 _name = 'Zc航空抽卡统计'
 _version = f'V{__version__}'
@@ -132,6 +137,10 @@ get_page_display_api_url = os.getenv(
 set_page_display_api_url = os.getenv(
     'ZCFLIGHT_SET_PAGE_DISPLAY_URL',
     'https://yubo.run/api/gachalog-zc/set-page-display',
+)
+get_page_style_list_api_url = os.getenv(
+    'ZCFLIGHT_GET_PAGE_STYLE_LIST_URL',
+    'https://yubo.run/api/gachalog-zc/get-page-style-list',
 )
 gacha_history_api_url = os.getenv(
     'ZCFLIGHT_GACHA_HISTORY_URL',
@@ -415,6 +424,7 @@ class SimpleApp:
         self.last_synced_user = None
         self.settings_window = None
         self.page_display_settings_window = None
+        self.page_display_settings_load_id = 0
         self.history_window = None
         self.history_records = {}
         self.history_load_id = 0
@@ -1158,6 +1168,10 @@ class SimpleApp:
                 self._show_gacha_history_result(*payload)
             elif result_type == "undo":
                 self._confirm_undo_last_gacha(*payload)
+            elif result_type == "page_display_settings":
+                self._show_page_display_settings_result(*payload)
+            elif result_type == "page_display_settings_saved":
+                self._show_page_display_settings_saved(*payload)
             elif result_type == "queue":
                 self._after_queue_task_finished(*payload)
         if not self.is_closing:
@@ -1187,20 +1201,6 @@ class SimpleApp:
             window.focus_force()
             return
 
-        try:
-            current_settings = get_page_display_settings(
-                client,
-                get_page_display_api_url,
-                login_token,
-            )
-        except (httpx.HTTPError, ValueError) as error:
-            messagebox.showerror(
-                "无法打开直播页面设置",
-                f"从服务器读取页面项目显示状态失败：\n{error}",
-                parent=self.root,
-            )
-            return
-
         window = tk.Toplevel(self.root)
         self.page_display_settings_window = window
         window.title("直播页面设置")
@@ -1212,11 +1212,115 @@ class SimpleApp:
         content.grid(row=0, column=0, sticky="nsew")
         ttk.Label(
             content,
+            text="正在加载直播页面设置…",
+        ).grid(row=0, column=0, sticky="w")
+        window.protocol(
+            "WM_DELETE_WINDOW",
+            lambda: self._close_page_display_settings(window),
+        )
+
+        self.page_display_settings_load_id += 1
+        load_id = self.page_display_settings_load_id
+        threading.Thread(
+            target=self._load_page_display_settings,
+            args=(load_id,),
+            name="page-display-settings",
+            daemon=True,
+        ).start()
+
+    def _load_page_display_settings(self, load_id):
+        request_error = None
+        try:
+            current_settings = get_page_display_settings(
+                client,
+                get_page_display_api_url,
+                login_token,
+            )
+            available_page_styles = get_available_page_styles(
+                client,
+                get_page_style_list_api_url,
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            current_settings = None
+            available_page_styles = None
+            request_error = error
+        self.background_results.put(
+            (
+                "page_display_settings",
+                load_id,
+                current_settings,
+                available_page_styles,
+                request_error,
+            )
+        )
+
+    def _show_page_display_settings_result(
+        self,
+        load_id,
+        current_settings,
+        available_page_styles,
+        error,
+    ):
+        window = self.page_display_settings_window
+        if (
+            load_id != self.page_display_settings_load_id
+            or window is None
+            or not window.winfo_exists()
+        ):
+            return
+        if error is not None:
+            self._close_page_display_settings(window)
+            messagebox.showerror(
+                "无法打开直播页面设置",
+                f"从服务器读取直播页面设置失败：\n{error}",
+                parent=self.root,
+            )
+            return
+
+        configured_page_style = current_settings["page_style"]
+        current_page_style = select_available_page_style(
+            configured_page_style,
+            available_page_styles,
+        )
+        unavailable_page_style_message = ""
+        if current_page_style != configured_page_style:
+            unavailable_page_style_message = (
+                f"当前样式“{configured_page_style}”已不可用，"
+                f"保存时将改用 {DEFAULT_PAGE_STYLE}。"
+            )
+
+        for child in window.winfo_children():
+            child.destroy()
+
+        content = ttk.Frame(window, padding=18)
+        content.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(content, text="页面样式").grid(
+            row=0,
+            column=0,
+            sticky="w",
+            padx=(0, 12),
+        )
+        page_style_variable = tk.StringVar(value=current_page_style)
+        ttk.Combobox(
+            content,
+            textvariable=page_style_variable,
+            values=available_page_styles,
+            state="readonly",
+            width=24,
+        ).grid(row=0, column=1, sticky="ew")
+        ttk.Label(
+            content,
             text="勾选表示显示，不勾选表示隐藏。",
-        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+        ).grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(16, 12),
+        )
 
         variables = {}
-        for row, (key, label) in enumerate(PAGE_DISPLAY_ITEMS, start=1):
+        for row, (key, label) in enumerate(PAGE_DISPLAY_ITEMS, start=2):
             variable = tk.BooleanVar(value=current_settings[key])
             variables[key] = variable
             ttk.Checkbutton(
@@ -1226,6 +1330,7 @@ class SimpleApp:
             ).grid(
                 row=row,
                 column=0,
+                columnspan=2,
                 sticky="w",
                 padx=(
                     (24, 0)
@@ -1238,28 +1343,88 @@ class SimpleApp:
                 pady=4,
             )
 
+        status_label = ttk.Label(
+            content,
+            text=unavailable_page_style_message,
+        )
+        status_label.grid(
+            row=len(PAGE_DISPLAY_ITEMS) + 3,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(8, 0),
+        )
+
         actions = ttk.Frame(content)
         actions.grid(
-            row=len(PAGE_DISPLAY_ITEMS) + 1,
+            row=len(PAGE_DISPLAY_ITEMS) + 2,
             column=0,
+            columnspan=2,
             sticky="e",
             pady=(16, 0),
         )
-        ttk.Button(actions, text="取消", command=window.destroy).pack(
-            side=tk.LEFT, padx=(0, 8)
+        cancel_button = ttk.Button(
+            actions,
+            text="取消",
+            command=lambda: self._close_page_display_settings(window),
         )
-        ttk.Button(
+        cancel_button.pack(side=tk.LEFT, padx=(0, 8))
+        save_button = ttk.Button(
             actions,
             text="保存",
-            command=lambda: self.save_page_display_settings(variables, window),
-        ).pack(side=tk.LEFT)
-        window.protocol("WM_DELETE_WINDOW", window.destroy)
+        )
+        save_button.configure(
+            command=lambda: self.save_page_display_settings(
+                variables,
+                page_style_variable,
+                save_button,
+                cancel_button,
+                status_label,
+                window,
+            )
+        )
+        save_button.pack(side=tk.LEFT)
 
-    def save_page_display_settings(self, variables, window):
+    def save_page_display_settings(
+        self,
+        variables,
+        page_style_variable,
+        save_button,
+        cancel_button,
+        status_label,
+        window,
+    ):
         settings = {
             key: variable.get()
             for key, variable in variables.items()
         }
+        settings["page_style"] = page_style_variable.get()
+        save_button.configure(state=tk.DISABLED)
+        cancel_button.configure(state=tk.DISABLED)
+        window.protocol("WM_DELETE_WINDOW", lambda: None)
+        status_label.configure(text="正在保存直播页面设置…")
+        threading.Thread(
+            target=self._save_page_display_settings,
+            args=(
+                settings,
+                window,
+                save_button,
+                cancel_button,
+                status_label,
+            ),
+            name="page-display-settings-save",
+            daemon=True,
+        ).start()
+
+    def _save_page_display_settings(
+        self,
+        settings,
+        window,
+        save_button,
+        cancel_button,
+        status_label,
+    ):
+        request_error = None
         try:
             set_page_display_settings(
                 client,
@@ -1268,14 +1433,50 @@ class SimpleApp:
                 settings,
             )
         except (httpx.HTTPError, ValueError) as error:
+            request_error = error
+        self.background_results.put(
+            (
+                "page_display_settings_saved",
+                window,
+                save_button,
+                cancel_button,
+                status_label,
+                request_error,
+            )
+        )
+
+    def _show_page_display_settings_saved(
+        self,
+        window,
+        save_button,
+        cancel_button,
+        status_label,
+        error,
+    ):
+        if not window.winfo_exists():
+            return
+        if error is not None:
+            save_button.configure(state=tk.NORMAL)
+            cancel_button.configure(state=tk.NORMAL)
+            window.protocol(
+                "WM_DELETE_WINDOW",
+                lambda: self._close_page_display_settings(window),
+            )
+            status_label.configure(text="保存失败")
             messagebox.showerror(
                 "保存失败",
-                f"更新服务器页面项目显示状态失败：\n{error}",
+                f"更新服务器直播页面设置失败：\n{error}",
                 parent=window,
             )
             return
 
-        window.destroy()
+        self._close_page_display_settings(window)
+
+    def _close_page_display_settings(self, window):
+        if window.winfo_exists():
+            window.destroy()
+        if self.page_display_settings_window is window:
+            self.page_display_settings_window = None
 
     def open_settings(self):
         if self.settings_window is not None and self.settings_window.winfo_exists():

@@ -91,6 +91,7 @@ ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-mani
 ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
 ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/get-page-display
 ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/set-page-display
+ZCFLIGHT_GET_PAGE_STYLE_LIST_URL=http://localhost:8000/api/gachalog-zc/get-page-style-list
 ZCFLIGHT_GACHA_HISTORY_URL=http://localhost:8000/api/gachalog-zc/history
 ZCFLIGHT_MOVE_GACHA_URL=http://localhost:8000/api/gachalog-zc/move-record
 ZCFLIGHT_REVOKE_GACHA_URL=http://localhost:8000/api/gachalog-zc/revoke
@@ -179,6 +180,7 @@ operators.txt
 - [ ] 客户端接入 羽bot 本体，实现浏览器回跳登录
 - [ ] 客户端允许多用户同时向同一卡池添加记录
 - [ ] 抽卡统计展示客户端
-- [ ] 前端页面增加更多样式
-- [ ] 客户端增加切换前端页面样式功能
+- [x] 前端页面支持切换主题样式
+- [x] 客户端增加切换前端页面主题样式功能
+- [ ] 支持自动热更新同名主题 CSS 文件
 - [ ] 完善客户端打包和发布流程

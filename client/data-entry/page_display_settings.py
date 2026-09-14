@@ -2,6 +2,8 @@
 
 import httpx
 
+from page_style_settings import normalize_page_style_name
+
 
 PAGE_DISPLAY_ITEMS = (
     ("is_scoreboard_visible", "左上角记分板"),
@@ -29,6 +31,7 @@ def _normalize_settings(data):
             settings[key] = bool(value)
         else:
             raise ValueError(f"服务器返回的直播页面设置缺少或包含无效字段：{key}")
+    settings["page_style"] = normalize_page_style_name(data.get("page_style"))
     return settings
 
 
