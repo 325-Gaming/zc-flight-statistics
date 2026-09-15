@@ -37,6 +37,8 @@ from tkinter import filedialog, messagebox, ttk
 from hotkeys import register_hotkeys
 from page_display_settings import (
     PAGE_DISPLAY_ITEMS,
+    POLL_INTERVAL_MAX_SECONDS,
+    POLL_INTERVAL_MIN_SECONDS,
     get_page_display_settings,
     set_page_display_settings,
 )
@@ -1343,12 +1345,35 @@ class SimpleApp:
                 pady=4,
             )
 
+        poll_interval_row = len(PAGE_DISPLAY_ITEMS) + 2
+        ttk.Label(content, text="数据轮询间隔（秒）").grid(
+            row=poll_interval_row,
+            column=0,
+            sticky="w",
+            pady=(12, 4),
+        )
+        poll_interval_variable = tk.StringVar(
+            value=str(current_settings["poll_interval_seconds"])
+        )
+        ttk.Spinbox(
+            content,
+            textvariable=poll_interval_variable,
+            from_=POLL_INTERVAL_MIN_SECONDS,
+            to=POLL_INTERVAL_MAX_SECONDS,
+            width=8,
+        ).grid(
+            row=poll_interval_row,
+            column=1,
+            sticky="w",
+            pady=(12, 4),
+        )
+
         status_label = ttk.Label(
             content,
             text=unavailable_page_style_message,
         )
         status_label.grid(
-            row=len(PAGE_DISPLAY_ITEMS) + 3,
+            row=poll_interval_row + 2,
             column=0,
             columnspan=2,
             sticky="w",
@@ -1357,7 +1382,7 @@ class SimpleApp:
 
         actions = ttk.Frame(content)
         actions.grid(
-            row=len(PAGE_DISPLAY_ITEMS) + 2,
+            row=poll_interval_row + 1,
             column=0,
             columnspan=2,
             sticky="e",
@@ -1377,6 +1402,7 @@ class SimpleApp:
             command=lambda: self.save_page_display_settings(
                 variables,
                 page_style_variable,
+                poll_interval_variable,
                 save_button,
                 cancel_button,
                 status_label,
@@ -1389,15 +1415,33 @@ class SimpleApp:
         self,
         variables,
         page_style_variable,
+        poll_interval_variable,
         save_button,
         cancel_button,
         status_label,
         window,
     ):
+        try:
+            poll_interval_seconds = int(poll_interval_variable.get())
+        except ValueError:
+            poll_interval_seconds = 0
+        if not (
+            POLL_INTERVAL_MIN_SECONDS
+            <= poll_interval_seconds
+            <= POLL_INTERVAL_MAX_SECONDS
+        ):
+            messagebox.showerror(
+                "无法保存直播页面设置",
+                "数据轮询间隔必须是 1 到 60 之间的整数。",
+                parent=window,
+            )
+            return
+
         settings = {
             key: variable.get()
             for key, variable in variables.items()
         }
+        settings["poll_interval_seconds"] = poll_interval_seconds
         settings["page_style"] = page_style_variable.get()
         save_button.configure(state=tk.DISABLED)
         cancel_button.configure(state=tk.DISABLED)

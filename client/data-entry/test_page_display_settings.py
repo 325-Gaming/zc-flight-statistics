@@ -16,6 +16,7 @@ class PageDisplaySettingsTests(unittest.TestCase):
             key: index % 2 == 0
             for index, (key, _) in enumerate(PAGE_DISPLAY_ITEMS)
         }
+        self.settings["poll_interval_seconds"] = 5
         self.settings["page_style"] = "sunset"
 
     def test_get_page_display_settings(self):
@@ -77,6 +78,23 @@ class PageDisplaySettingsTests(unittest.TestCase):
                     "https://example.test/get-page-display",
                     "test-token",
                 )
+
+    def test_get_page_display_settings_rejects_invalid_poll_interval(self):
+        for value in (True, 0, 61, "5"):
+            with self.subTest(value=value):
+                settings = dict(self.settings)
+                settings["poll_interval_seconds"] = value
+                with httpx.Client(
+                    transport=httpx.MockTransport(
+                        lambda request: httpx.Response(200, json=settings)
+                    )
+                ) as http_client:
+                    with self.assertRaisesRegex(ValueError, "轮询间隔无效"):
+                        get_page_display_settings(
+                            http_client,
+                            "https://example.test/get-page-display",
+                            "test-token",
+                        )
 
 
 if __name__ == "__main__":
