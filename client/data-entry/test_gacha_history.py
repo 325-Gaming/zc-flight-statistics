@@ -4,12 +4,18 @@ import httpx
 
 from gacha_history import (
     GachaHistoryRecord,
+    format_gacha_position,
     get_gacha_history,
     sort_gacha_history_records,
 )
 
 
 class GachaHistoryTests(unittest.TestCase):
+    def test_formats_single_and_ten_pull_positions(self):
+        self.assertEqual(format_gacha_position(1, 1), "1")
+        self.assertEqual(format_gacha_position(1, 10), "1~10")
+        self.assertEqual(format_gacha_position(11, 10), "11~20")
+
     def test_sorts_passengers_by_first_record_id_and_records_by_sequence(self):
         def record(record_id, nickname, sequence_no):
             return GachaHistoryRecord(

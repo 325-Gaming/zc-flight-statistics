@@ -20,7 +20,7 @@ import time
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
 
-from gacha_history import get_gacha_history
+from gacha_history import format_gacha_position, get_gacha_history
 from gacha_upload import (
     GachaMoveTask,
     GachaStateTask,
@@ -990,7 +990,10 @@ class SimpleApp:
             if record.is_revoked:
                 record_positions[record.record_id] = "—"
             else:
-                record_positions[record.record_id] = position
+                record_positions[record.record_id] = format_gacha_position(
+                    position,
+                    record.count,
+                )
                 positions[record.nickname] = position + record.count
 
         for record in records:

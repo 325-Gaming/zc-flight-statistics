@@ -52,6 +52,12 @@ def sort_gacha_history_records(records):
     )
 
 
+def format_gacha_position(position, count):
+    if count == 10:
+        return f"{position}~{position + 9}"
+    return str(position)
+
+
 def get_gacha_history(
     client,
     url,
