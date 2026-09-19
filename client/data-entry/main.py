@@ -416,7 +416,13 @@ class SimpleApp:
         self.root.geometry("920x600")
         self.root.minsize(860, 600)
         self._configure_light_theme()
-        self.root.iconbitmap(BASE_DIR / 'favicon.ico')
+        if sys.platform == 'win32':
+            self.root.iconbitmap(BASE_DIR / 'favicon.ico')
+        else:
+            # macOS uses iconphoto to set the application's Dock icon.
+            with Image.open(BASE_DIR / 'favicon.ico') as icon_image:
+                self._app_icon = ImageTk.PhotoImage(icon_image, master=self.root)
+            self.root.iconphoto(True, self._app_icon)
         self.event_name = event_name
         self.user_name_list = list(user_name_list)
         self.user_id = -1
@@ -2148,7 +2154,28 @@ class SimpleApp:
             self.set_user(self.user_id - 1)
 
     def run(self):
+        self.root.after_idle(self._show_main_window_in_foreground)
         self.root.mainloop()
+
+    def _show_main_window_in_foreground(self):
+        if self.is_closing or not self.root.winfo_exists():
+            return
+        self.root.deiconify()
+        self.root.lift()
+        try:
+            self.root.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        self.root.focus_force()
+        self.root.after(500, self._release_main_window_topmost)
+
+    def _release_main_window_topmost(self):
+        if self.is_closing or not self.root.winfo_exists():
+            return
+        try:
+            self.root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
 
     def enqueue_gacha_result(self, count, character_list):
         gacha_index = self.gacha_index
