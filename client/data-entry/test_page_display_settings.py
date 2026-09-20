@@ -4,7 +4,9 @@ import unittest
 import httpx
 
 from page_display_settings import (
+    PAGE_ACTIVITY_ITEM,
     PAGE_DISPLAY_ITEMS,
+    PAGE_TEXT_ITEMS,
     get_page_display_settings,
     set_page_display_settings,
 )
@@ -14,10 +16,18 @@ class PageDisplaySettingsTests(unittest.TestCase):
     def setUp(self):
         self.settings = {
             key: index % 2 == 0
-            for index, (key, _) in enumerate(PAGE_DISPLAY_ITEMS)
+            for index, (key, _) in enumerate(
+                (PAGE_ACTIVITY_ITEM, *PAGE_DISPLAY_ITEMS)
+            )
         }
         self.settings["poll_interval_seconds"] = 5
         self.settings["page_style"] = "sunset"
+        self.settings.update(
+            {
+                "bottom_info_identity_text": "乘客",
+                "bottom_info_text": "欢迎乘坐 Zc 航空",
+            }
+        )
 
     def test_get_page_display_settings(self):
         def handler(request):
@@ -90,6 +100,23 @@ class PageDisplaySettingsTests(unittest.TestCase):
                     )
                 ) as http_client:
                     with self.assertRaisesRegex(ValueError, "轮询间隔无效"):
+                        get_page_display_settings(
+                            http_client,
+                            "https://example.test/get-page-display",
+                            "test-token",
+                        )
+
+    def test_get_page_display_settings_rejects_missing_text_fields(self):
+        for key, _ in PAGE_TEXT_ITEMS:
+            with self.subTest(key=key):
+                settings = dict(self.settings)
+                del settings[key]
+                with httpx.Client(
+                    transport=httpx.MockTransport(
+                        lambda request: httpx.Response(200, json=settings)
+                    )
+                ) as http_client:
+                    with self.assertRaisesRegex(ValueError, key):
                         get_page_display_settings(
                             http_client,
                             "https://example.test/get-page-display",

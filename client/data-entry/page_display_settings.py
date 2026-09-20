@@ -12,6 +12,11 @@ PAGE_DISPLAY_ITEMS = (
     ("is_bottom_info_right_visible", "底部信息栏（右）"),
     ("is_bottom_ticker_visible", "底部滚动条"),
 )
+PAGE_TEXT_ITEMS = (
+    ("bottom_info_identity_text", "底栏身份文案"),
+    ("bottom_info_text", "底栏标题"),
+)
+PAGE_ACTIVITY_ITEM = ("is_active", "直播页面活跃刷新")
 POLL_INTERVAL_MAX_SECONDS = 60
 POLL_INTERVAL_MIN_SECONDS = 1
 
@@ -25,7 +30,7 @@ def _normalize_settings(data):
         raise ValueError("服务器返回的直播页面设置格式不正确")
 
     settings = {}
-    for key, _ in PAGE_DISPLAY_ITEMS:
+    for key, _ in (PAGE_ACTIVITY_ITEM, *PAGE_DISPLAY_ITEMS):
         value = data.get(key)
         if isinstance(value, bool):
             settings[key] = value
@@ -44,6 +49,11 @@ def _normalize_settings(data):
         raise ValueError("服务器返回的直播页面轮询间隔无效")
     settings["poll_interval_seconds"] = poll_interval_seconds
     settings["page_style"] = normalize_page_style_name(data.get("page_style"))
+    for key, _ in PAGE_TEXT_ITEMS:
+        value = data.get(key)
+        if not isinstance(value, str):
+            raise ValueError(f"服务器返回的直播页面设置缺少或包含无效字段：{key}")
+        settings[key] = value
     return settings
 
 

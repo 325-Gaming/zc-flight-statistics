@@ -1,6 +1,6 @@
 # Zc Flight Statistics
 
-本仓库用于管理 Zc 航空抽卡统计的各个组件。
+本仓库用于管理**Zc航空抽卡统计**的各个组件。
 
 ## 组件
 
@@ -8,7 +8,7 @@
 
 **路径：** `client/data-entry`
 
-Zc 航空抽卡数据录入客户端。程序会截取指定显示器，使用 TensorFlow 模型识别抽卡画面和干员，然后将结果提交至统计接口。
+Zc航空抽卡统计数据录入客户端。程序会截取指定显示器，使用 TensorFlow 模型识别抽卡画面和干员，然后将结果提交至统计接口。
 
 #### 功能
 
@@ -20,7 +20,7 @@ Zc 航空抽卡数据录入客户端。程序会截取指定显示器，使用 T
 - 支持单抽、十连全局快捷键，且可按操作单独关闭
 - 将识别结果和截图提交至统计接口
 - 启动时自动检查、校验并更新识别模型
-- 支持在运行时修改活动、显示器、乘客名单和快捷键
+- 支持在运行时修改活动、切换卡池、显示器、乘客名单和快捷键
 - 支持查看所选显示器的截图预览
 - 支持通过“统计 → 直播页面设置…”控制直播页面各项目的显示状态
 - 通过 `.env` 保存本地认证信息
@@ -53,6 +53,44 @@ client/data-entry/
 `models` 目录会被 Git 保留，但其中的模型、干员类别表和本地版本清单不会提交。客户端启动时会从服务器获取模型清单；下载完成并通过文件大小和 SHA-256 校验后，才会替换本地文件。`operators.txt` 与 `gacha10.keras` 配套，由模型训练项目维护并经服务器分发，不在客户端项目中单独维护。服务器临时不可用时会继续使用已有文件；首次运行且本地没有模型或类别表时，需要能够连接模型服务。
 
 #### 安装
+
+##### Windows 一键安装（推荐）
+
+适用于 Windows 10/11 **Intel/AMD 64 位**电脑，无需预装 Python、Git 或 Conda。
+
+1. 下载并解压本仓库，或取得完整的 `client/data-entry` 文件夹，将它放在固定、可写且路径较短的位置，例如 `C:\ZcFlight\data-entry`。不要直接在压缩包内运行，也不要放在 `Program Files` 下。
+2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。TensorFlow 下载较大，需要保持网络连接。
+3. 用记事本打开同目录的 `.env`，将 `ZCFLIGHT_LOGIN_TOKEN=replace-me` 中的占位值替换为真实 token 并保存。已有 `.env` 不会被覆盖。
+4. 双击 `start.bat`，或桌面上的 **Zc航空抽卡统计数据录入** 快捷方式。首次启动会下载识别模型；进入“文件 → 设置…”选择当前活动和显示器。
+
+安装器会检查 Microsoft Visual C++ 运行库；缺失时下载并验证微软签名，随后请求 Windows 管理员授权进行安装。如提示重启，请重启系统后再次运行 `install.bat`。Python 和应用依赖的安装不需要管理员权限。
+
+**指定软件包源：** 双击安装默认使用清华源，也可以在客户端目录打开终端后指定中科大源或官方 PyPI：
+
+```powershell
+.\install.bat -IndexUrl https://mirrors.ustc.edu.cn/pypi/simple
+.\install.bat -IndexUrl https://pypi.org/simple
+```
+
+直接运行 `install.ps1` 时同样支持 `-IndexUrl`，可以填写其他 HTTPS 软件包索引地址（不支持在 URL 中包含账号密码、查询参数或片段）。安装窗口和日志会显示所选源；该选项仅作用于本次安装，不修改全局 pip/uv 配置，也不混用终端环境变量中的额外索引。如果镜像不可用或尚未同步所需版本，可显式指定官方源后重试。
+
+这里未采用自动测速：索引页面的响应时间不能可靠代表 TensorFlow 等大文件的下载速度。软件包源选项只影响 Python 依赖，uv、Python 本体及微软运行库仍从原下载地址获取；识别模型仍由客户端从模型服务下载。
+
+运行环境保存在 `client/data-entry/.runtime/` 和 `.venv/`，不会修改系统 PATH、系统 Python 或 Conda 环境。`config.json`、`.env`、`name.csv` 和 `models/` 仍保存在客户端目录，可单独备份。安装完成前会检查依赖、TensorFlow 和 Tk 图形界面；此步骤不会连接业务接口或上传数据。
+
+后续更新代码后，先关闭客户端，再运行 `install.bat` 补齐依赖；脚本可重复执行，不会覆盖已有配置、名单或模型。它不负责自动更新客户端代码。不要移动已经安装的目录：虚拟环境和桌面快捷方式依赖原路径。如果需要迁移，先关闭客户端，复制整个目录，删除新位置的 `.venv/` 和 `.runtime/`，再重新安装；保留 `.env`、配置、名单及模型。
+
+安装失败时，窗口会保留错误信息，详细日志位于 `.runtime/install.log`。网络失败可直接重试；环境损坏时，关闭客户端后仅删除 `.venv/` 再安装。路径过长时改用较短路径。启动失败时，`start.bat` 会保留错误窗口。安装器仅为当前 PowerShell 进程设置执行策略，不会修改系统执行策略；若设备受组织策略限制，请联系管理员。
+
+需要在自动化环境中跳过桌面快捷方式时，可运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File client/data-entry/install.ps1 -NoShortcut
+```
+
+Windows 安装流程的集成检查可通过 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File client/data-entry/test_windows_install.ps1` 执行。检查会在包含空格和中文的临时目录中真实下载依赖，验证首次安装、重复安装保留数据及并发安装拦截，不会读取真实 token 或连接业务接口。临时目录会保留并在结束时输出位置，检查完成后可自行删除。
+
+##### 手动安装（开发及其他平台）
 
 建议使用独立的 Python 虚拟环境。
 
@@ -89,6 +127,8 @@ ZCFLIGHT_LOGIN_TOKEN=replace-with-your-token
 ```dotenv
 ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-manifest
 ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
+ZCFLIGHT_GET_POOL_LIST_URL=http://localhost:8000/api/gachalog-zc/get-pool-list
+ZCFLIGHT_SET_CURRENT_POOL_URL=http://localhost:8000/api/gachalog-zc/set-current-pool
 ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/get-page-display
 ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/set-page-display
 ZCFLIGHT_GET_PAGE_STYLE_LIST_URL=http://localhost:8000/api/gachalog-zc/get-page-style-list
@@ -106,7 +146,8 @@ ZCFLIGHT_RESTORE_GACHA_URL=http://localhost:8000/api/gachalog-zc/restore
 
 | 配置项 | 作用 |
 | --- | --- |
-| `event_name` | 活动名称 |
+| `event_name` | 基础活动名称，会与卡池名拼接为完整活动名称 |
+| `pool_name` | 卡池名称，由设置窗口从服务器卡池列表中选择 |
 | `target_monitor_id` | 需要截取的显示器编号 |
 | `user_name_list_file` | 乘客名单文件，相对于 `client/data-entry` |
 | `hotkey_gacha10` | 十连快捷键，可留空 |
@@ -115,10 +156,15 @@ ZCFLIGHT_RESTORE_GACHA_URL=http://localhost:8000/api/gachalog-zc/restore
 | `hotkey_5x` | 五星单抽快捷键，可留空 |
 | `hotkey_6x` | 六星单抽快捷键，可留空 |
 
+`event_name` 和 `pool_name` 均为必填项。旧版将卡池名直接拼入
+`event_name` 的配置格式不再受支持，升级时需要手动拆分这两个字段。
+
 切换、选择或导入名单后进入新的当前乘客时，客户端会自动将当前乘客信息
 同步至统计服务，无需额外操作。
 
-设置窗口会列出显示器的编号、分辨率和位置，并支持预览所选显示器。如果截取内容不正确，可以在预览后直接更换显示器。编号 `0` 通常表示所有显示器的组合区域。
+设置窗口会从服务器加载可用卡池，并实时预览由基础活动名称和卡池名称拼接得到的完整活动名称。保存时会同步切换直播页当前卡池。
+
+设置窗口还会列出显示器的编号、分辨率和位置，并支持预览所选显示器。如果截取内容不正确，可以在预览后直接更换显示器。编号 `0` 通常表示所有显示器的组合区域。
 
 #### 启动
 

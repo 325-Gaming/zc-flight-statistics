@@ -34,13 +34,22 @@ from version import __version__
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from event_settings import compose_event_name
 from hotkeys import register_hotkeys
 from page_display_settings import (
+    PAGE_ACTIVITY_ITEM,
     PAGE_DISPLAY_ITEMS,
+    PAGE_TEXT_ITEMS,
     POLL_INTERVAL_MAX_SECONDS,
     POLL_INTERVAL_MIN_SECONDS,
     get_page_display_settings,
     set_page_display_settings,
+)
+from page_pool_settings import (
+    get_page_pool_settings,
+    get_pool_sync_message,
+    select_initial_pool_name,
+    set_current_pool,
 )
 from page_style_settings import (
     DEFAULT_PAGE_STYLE,
@@ -48,7 +57,7 @@ from page_style_settings import (
     select_available_page_style,
 )
 
-_name = 'Zc航空抽卡统计'
+_name = 'Zc航空抽卡统计数据录入'
 _version = f'V{__version__}'
 _version_number = __version__
 print('{} {} 启动！'.format(_name, _version))
@@ -95,7 +104,8 @@ if not login_token or login_token == 'replace-me':
 with open(CONFIG_PATH, 'r', encoding='utf-8') as config_file:
     config = json.load(config_file)
 target_monitor_id = int(config['target_monitor_id'])
-event_name = config['event_name']
+event_name = str(config['event_name']).strip()
+pool_name = str(config['pool_name']).strip()
 user_name_list_file = config['user_name_list_file']
 hotkey_gacha10 = config['hotkey_gacha10']
 hotkey_3x = config['hotkey_3x']
@@ -116,7 +126,7 @@ if user_name_list_file == 'name.csv' and not passenger_list_path.exists():
             f'无法根据乘客名单模板创建 name.csv：{error}'
         ) from error
 
-print('当前活动 {}'.format(event_name))
+print('当前活动 {}'.format(compose_event_name(event_name, pool_name)))
 
 
 
@@ -127,6 +137,14 @@ submit_gacha_log_api_url = 'https://yubo.run/api/gachalog-zc/submit'
 set_current_user_api_url = os.getenv(
     'ZCFLIGHT_CURRENT_USER_URL',
     'https://yubo.run/api/gachalog-zc/set-current-user',
+)
+get_pool_list_api_url = os.getenv(
+    'ZCFLIGHT_GET_POOL_LIST_URL',
+    'https://yubo.run/api/gachalog-zc/get-pool-list',
+)
+set_current_pool_api_url = os.getenv(
+    'ZCFLIGHT_SET_CURRENT_POOL_URL',
+    'https://yubo.run/api/gachalog-zc/set-current-pool',
 )
 model_manifest_api_url = os.getenv(
     'ZCFLIGHT_MODEL_MANIFEST_URL',
@@ -160,6 +178,7 @@ restore_gacha_log_api_url = os.getenv(
     'ZCFLIGHT_RESTORE_GACHA_URL',
     'https://yubo.run/api/gachalog-zc/restore',
 )
+statistics_page_url = "https://yubo.run/zc/zc-flight-live.html?zcnb=zcnb"
 # submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
 
 
@@ -410,7 +429,7 @@ def capture_and_predict():
 
 
 class SimpleApp:
-    def __init__(self, event_name, user_name_list):
+    def __init__(self, event_name, pool_name, user_name_list):
         self.root = tk.Tk()
         self.root.title(f'{_name} {_version}')
         self.root.geometry("920x600")
@@ -424,6 +443,7 @@ class SimpleApp:
                 self._app_icon = ImageTk.PhotoImage(icon_image, master=self.root)
             self.root.iconphoto(True, self._app_icon)
         self.event_name = event_name
+        self.pool_name = pool_name
         self.user_name_list = list(user_name_list)
         self.user_id = -1
         self.gacha_index = 1
@@ -431,8 +451,10 @@ class SimpleApp:
         self.is_closing = False
         self.last_synced_user = None
         self.settings_window = None
+        self.settings_load_id = 0
         self.page_display_settings_window = None
         self.page_display_settings_load_id = 0
+        self.statistics_window = None
         self.history_window = None
         self.history_records = {}
         self.history_load_id = 0
@@ -463,6 +485,10 @@ class SimpleApp:
         self.root.after(100, self._process_background_results)
 
         self.new_user()
+
+    @property
+    def full_event_name(self):
+        return compose_event_name(self.event_name, self.pool_name)
 
     def _configure_light_theme(self):
         """固定使用浅色主题，不跟随系统明暗模式变化。"""
@@ -526,7 +552,7 @@ class SimpleApp:
                 (
                     ("直播页面设置…", self.open_page_display_settings),
                     None,
-                    ("查看统计", lambda: None),
+                    ("查看统计", self.open_statistics),
                 ),
             )
             return
@@ -558,7 +584,7 @@ class SimpleApp:
             label="直播页面设置…", command=self.open_page_display_settings
         )
         statistics_menu.add_separator()
-        statistics_menu.add_command(label="查看统计", command=lambda: None)
+        statistics_menu.add_command(label="查看统计", command=self.open_statistics)
         statistics_button.configure(menu=statistics_menu)
 
     def _create_popup_menu_button(self, parent, text, items):
@@ -630,6 +656,74 @@ class SimpleApp:
         if sys.platform == "darwin":
             self._close_popup_menu()
         self.root.after(0, callback)
+
+    def open_statistics(self):
+        window = self.statistics_window
+        if window is not None and window.winfo_exists():
+            window.lift()
+            window.focus_force()
+            return
+
+        window = tk.Toplevel(self.root)
+        self.statistics_window = window
+        window.title("查看统计")
+        window.resizable(False, False)
+        window.configure(background="#f2f2f2")
+        window.transient(self.root)
+
+        content = ttk.Frame(window, padding=18)
+        content.grid(row=0, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+
+        url_entry = ttk.Entry(content, width=68)
+        url_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        url_entry.insert(0, statistics_page_url)
+
+        copy_button = ttk.Button(content, text="点击复制")
+        copy_button.grid(row=0, column=1)
+
+        def reset_copy_button():
+            window.copy_reset_after_id = None
+            if window.winfo_exists():
+                copy_button.configure(text="点击复制")
+
+        def copy_statistics_url():
+            window.clipboard_clear()
+            window.clipboard_append(url_entry.get())
+            copy_button.configure(text="已复制")
+            if window.copy_reset_after_id is not None:
+                window.after_cancel(window.copy_reset_after_id)
+            window.copy_reset_after_id = window.after(
+                3000,
+                reset_copy_button,
+            )
+
+        copy_button.configure(command=copy_statistics_url)
+        window.copy_reset_after_id = None
+
+        ttk.Label(
+            content,
+            text=(
+                "在OBS添加浏览器源，URL填写上方URL，宽度与高度设为与画布相同"
+                "（1920x1080 / 2560x1440）"
+            ),
+            justify=tk.LEFT,
+        ).grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(14, 0),
+        )
+
+        def close_statistics():
+            if window.copy_reset_after_id is not None:
+                window.after_cancel(window.copy_reset_after_id)
+            window.destroy()
+            if self.statistics_window is window:
+                self.statistics_window = None
+
+        window.protocol("WM_DELETE_WINDOW", close_statistics)
 
     def _create_menu(self, parent):
         return tk.Menu(
@@ -960,7 +1054,7 @@ class SimpleApp:
                 client,
                 gacha_history_api_url,
                 login_token,
-                self.event_name,
+                self.full_event_name,
                 nickname=nickname,
             )
         except (httpx.HTTPError, RuntimeError, ValueError) as request_error:
@@ -1086,10 +1180,10 @@ class SimpleApp:
         ):
             return
         if is_revoked:
-            self.upload_queue.revoke(self.event_name, record.record_id)
+            self.upload_queue.revoke(self.full_event_name, record.record_id)
             action = "撤销"
         else:
-            self.upload_queue.restore(self.event_name, record.record_id)
+            self.upload_queue.restore(self.full_event_name, record.record_id)
             action = "恢复"
         self.history_status_label.configure(text=f"{action}操作已加入队列…")
         self.history_revoke_button.configure(state=tk.DISABLED)
@@ -1106,7 +1200,7 @@ class SimpleApp:
         record = self.history_records.get(int(selection[0]))
         if record is None:
             return
-        self.upload_queue.move(self.event_name, record.record_id, action)
+        self.upload_queue.move(self.full_event_name, record.record_id, action)
         action_labels = {
             "first": "移至最前",
             "last": "移至最后",
@@ -1153,7 +1247,7 @@ class SimpleApp:
                 client,
                 gacha_history_api_url,
                 login_token,
-                self.event_name,
+                self.full_event_name,
                 nickname=nickname,
             )
         except (httpx.HTTPError, RuntimeError, ValueError) as request_error:
@@ -1183,6 +1277,8 @@ class SimpleApp:
                 self._show_page_display_settings_result(*payload)
             elif result_type == "page_display_settings_saved":
                 self._show_page_display_settings_saved(*payload)
+            elif result_type == "settings_pool":
+                self._show_settings_pool_result(*payload)
             elif result_type == "queue":
                 self._after_queue_task_finished(*payload)
         if not self.is_closing:
@@ -1203,7 +1299,7 @@ class SimpleApp:
             f"确定撤销 {nickname} 最近上传的 {record.count} 抽记录吗？",
         ):
             return
-        self.upload_queue.revoke(self.event_name, record.record_id)
+        self.upload_queue.revoke(self.full_event_name, record.record_id)
 
     def open_page_display_settings(self):
         window = self.page_display_settings_window
@@ -1221,6 +1317,7 @@ class SimpleApp:
 
         content = ttk.Frame(window, padding=18)
         content.grid(row=0, column=0, sticky="nsew")
+        content.columnconfigure(1, weight=1)
         ttk.Label(
             content,
             text="正在加载直播页面设置…",
@@ -1305,33 +1402,109 @@ class SimpleApp:
 
         content = ttk.Frame(window, padding=18)
         content.grid(row=0, column=0, sticky="nsew")
-        ttk.Label(content, text="页面样式").grid(
+        page_style_variable = tk.StringVar(value=current_page_style)
+
+        variables = {}
+        activity_key, activity_label = PAGE_ACTIVITY_ITEM
+        activity_variable = tk.BooleanVar(value=current_settings[activity_key])
+        variables[activity_key] = activity_variable
+        ttk.Checkbutton(
+            content,
+            text=activity_label,
+            variable=activity_variable,
+        ).grid(
             row=0,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=4,
+        )
+
+        ttk.Label(content, text="数据轮询间隔（秒）").grid(
+            row=1,
+            column=0,
+            sticky="w",
+            pady=(8, 4),
+        )
+        poll_interval_variable = tk.StringVar(
+            value=str(current_settings["poll_interval_seconds"])
+        )
+        poll_interval_spinbox = ttk.Spinbox(
+            content,
+            textvariable=poll_interval_variable,
+            from_=POLL_INTERVAL_MIN_SECONDS,
+            to=POLL_INTERVAL_MAX_SECONDS,
+            width=8,
+        )
+        poll_interval_spinbox.grid(
+            row=1,
+            column=1,
+            sticky="w",
+            pady=(8, 4),
+        )
+
+        def update_poll_interval_state(*_args):
+            poll_interval_spinbox.configure(
+                state=tk.NORMAL if activity_variable.get() else tk.DISABLED
+            )
+
+        activity_variable.trace_add("write", update_poll_interval_state)
+        update_poll_interval_state()
+
+        ttk.Label(
+            content,
+            text="仅在直播页面活跃刷新时生效，不活跃时固定为60秒",
+        ).grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(0, 4),
+        )
+
+        ttk.Separator(content, orient=tk.HORIZONTAL).grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=12,
+        )
+
+        ttk.Label(content, text="页面样式").grid(
+            row=4,
             column=0,
             sticky="w",
             padx=(0, 12),
         )
-        page_style_variable = tk.StringVar(value=current_page_style)
         ttk.Combobox(
             content,
             textvariable=page_style_variable,
             values=available_page_styles,
             state="readonly",
             width=24,
-        ).grid(row=0, column=1, sticky="ew")
+        ).grid(row=4, column=1, sticky="ew")
+
+        ttk.Separator(content, orient=tk.HORIZONTAL).grid(
+            row=5,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=12,
+        )
+
         ttk.Label(
             content,
-            text="勾选表示显示，不勾选表示隐藏。",
+            text="页面项目，勾选表示显示，不勾选表示隐藏。",
         ).grid(
-            row=1,
+            row=6,
             column=0,
             columnspan=2,
             sticky="w",
-            pady=(16, 12),
+            pady=(0, 12),
         )
 
-        variables = {}
-        for row, (key, label) in enumerate(PAGE_DISPLAY_ITEMS, start=2):
+        row = 7
+        for key, label in PAGE_DISPLAY_ITEMS:
             variable = tk.BooleanVar(value=current_settings[key])
             variables[key] = variable
             ttk.Checkbutton(
@@ -1353,36 +1526,39 @@ class SimpleApp:
                 ),
                 pady=4,
             )
+            row += 1
 
-        poll_interval_row = len(PAGE_DISPLAY_ITEMS) + 2
-        ttk.Label(content, text="数据轮询间隔（秒）").grid(
-            row=poll_interval_row,
-            column=0,
-            sticky="w",
-            pady=(12, 4),
-        )
-        poll_interval_variable = tk.StringVar(
-            value=str(current_settings["poll_interval_seconds"])
-        )
-        ttk.Spinbox(
-            content,
-            textvariable=poll_interval_variable,
-            from_=POLL_INTERVAL_MIN_SECONDS,
-            to=POLL_INTERVAL_MAX_SECONDS,
-            width=8,
-        ).grid(
-            row=poll_interval_row,
-            column=1,
-            sticky="w",
-            pady=(12, 4),
-        )
+            if key == "is_bottom_info_right_visible":
+                for text_key, text_label in PAGE_TEXT_ITEMS:
+                    text_variable = tk.StringVar(value=current_settings[text_key])
+                    variables[text_key] = text_variable
+                    ttk.Label(content, text=text_label).grid(
+                        row=row,
+                        column=0,
+                        sticky="w",
+                        padx=(48, 12),
+                        pady=4,
+                    )
+                    ttk.Entry(
+                        content,
+                        textvariable=text_variable,
+                        width=32,
+                    ).grid(
+                        row=row,
+                        column=1,
+                        sticky="ew",
+                        pady=4,
+                    )
+                    row += 1
+
+        actions_row = row
 
         status_label = ttk.Label(
             content,
             text=unavailable_page_style_message,
         )
         status_label.grid(
-            row=poll_interval_row + 2,
+            row=actions_row + 1,
             column=0,
             columnspan=2,
             sticky="w",
@@ -1391,7 +1567,7 @@ class SimpleApp:
 
         actions = ttk.Frame(content)
         actions.grid(
-            row=poll_interval_row + 1,
+            row=actions_row,
             column=0,
             columnspan=2,
             sticky="e",
@@ -1551,14 +1727,98 @@ class SimpleApp:
         window = tk.Toplevel(self.root)
         self.settings_window = window
         window.title("设置")
-        window.geometry("780x700")
-        window.minsize(700, 640)
+        window.geometry("780x760")
+        window.minsize(700, 700)
         window.configure(background="#f2f2f2")
         window.transient(self.root)
         window.columnconfigure(0, weight=1)
+        content = ttk.Frame(window, padding=18)
+        content.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(content, text="正在加载直播页卡池列表…").grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
+        window.protocol("WM_DELETE_WINDOW", lambda: self.close_settings(window))
+
+        self.settings_load_id += 1
+        load_id = self.settings_load_id
+        threading.Thread(
+            target=self._load_settings_pool_settings,
+            args=(load_id, current_config),
+            name="settings-pool-list",
+            daemon=True,
+        ).start()
+
+    def _load_settings_pool_settings(self, load_id, current_config):
+        try:
+            pool_settings = get_page_pool_settings(
+                client,
+                get_pool_list_api_url,
+                login_token,
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            pool_settings = None
+            request_error = error
+        else:
+            request_error = None
+        self.background_results.put(
+            (
+                "settings_pool",
+                load_id,
+                current_config,
+                pool_settings,
+                request_error,
+            )
+        )
+
+    def _show_settings_pool_result(
+        self,
+        load_id,
+        current_config,
+        pool_settings,
+        error,
+    ):
+        window = self.settings_window
+        if (
+            load_id != self.settings_load_id
+            or window is None
+            or not window.winfo_exists()
+        ):
+            return
+        if error is not None:
+            self.close_settings(window)
+            messagebox.showerror(
+                "无法打开设置",
+                f"从服务器读取直播页卡池列表失败：\n{error}",
+                parent=self.root,
+            )
+            return
+
+        pool_names = pool_settings["pool_names"]
+        current_pool_name = pool_settings["current_pool_name"]
+        configured_event_name = str(current_config.get("event_name", "")).strip()
+        configured_pool_name = str(current_config.get("pool_name", "")).strip()
+        selected_pool_name = select_initial_pool_name(
+            configured_pool_name,
+            current_pool_name,
+            pool_names,
+        )
+
+        for child in window.winfo_children():
+            child.destroy()
 
         settings = (
-            ("event_name", "活动名称", "提交抽卡记录时使用的活动名称。"),
+            (
+                "event_name",
+                "活动名称",
+                "基础活动名称，会与卡池名称拼接后提交抽卡记录。",
+            ),
+            (
+                "pool_name",
+                "卡池名称",
+                "",
+            ),
             (
                 "target_monitor_id",
                 "截图显示器编号",
@@ -1579,12 +1839,43 @@ class SimpleApp:
         content.grid(row=0, column=0, sticky="nsew")
         content.columnconfigure(1, weight=1)
         entries = {}
+        settings_variables = {
+            "event_name": tk.StringVar(
+                master=window,
+                value=configured_event_name,
+            ),
+            "pool_name": tk.StringVar(
+                master=window,
+                value=selected_pool_name,
+            ),
+            "event_preview": tk.StringVar(master=window),
+        }
+        window.settings_variables = settings_variables
+        event_name_variable = settings_variables["event_name"]
+        pool_name_variable = settings_variables["pool_name"]
+        event_preview_variable = settings_variables["event_preview"]
         for index, (key, label, description) in enumerate(settings):
             row = index * 2
             ttk.Label(content, text=label).grid(
                 row=row, column=0, sticky="w", padx=(0, 12), pady=6
             )
-            if key == "target_monitor_id":
+            if key == "pool_name":
+                pool_selector = ttk.Combobox(
+                    content,
+                    textvariable=pool_name_variable,
+                    values=pool_names,
+                    state="readonly",
+                )
+                pool_selector.grid(row=row, column=1, sticky="ew", pady=6)
+                entries[key] = pool_selector
+            elif key == "event_name":
+                event_name_entry = ttk.Entry(
+                    content,
+                    textvariable=event_name_variable,
+                )
+                event_name_entry.grid(row=row, column=1, sticky="ew", pady=6)
+                entries[key] = event_name_entry
+            elif key == "target_monitor_id":
                 monitor_row = ttk.Frame(content)
                 monitor_row.grid(row=row, column=1, sticky="ew", pady=6)
                 monitor_row.columnconfigure(0, weight=1)
@@ -1626,12 +1917,44 @@ class SimpleApp:
                 entry.grid(row=row, column=1, sticky="ew", pady=6)
                 entry.insert(0, str(current_config.get(key, "")))
                 entries[key] = entry
-            ttk.Label(content, text=description).grid(
+            description_label_options = (
+                {
+                    "textvariable": event_preview_variable,
+                    "justify": tk.LEFT,
+                }
+                if key == "pool_name"
+                else {"text": description}
+            )
+            ttk.Label(content, **description_label_options).grid(
                 row=row + 1,
                 column=1,
                 sticky="w",
                 pady=(0, 5),
             )
+
+        def update_event_preview(*_args):
+            selected_pool_name = entries["pool_name"].get().strip()
+            try:
+                full_event_name = compose_event_name(
+                    entries["event_name"].get(),
+                    selected_pool_name,
+                )
+            except ValueError:
+                full_event_name = "—"
+            pool_sync_message = get_pool_sync_message(
+                configured_pool_name,
+                current_pool_name,
+                selected_pool_name,
+                pool_names,
+            )
+            preview_text = f"完整活动名称预览：{full_event_name}"
+            if pool_sync_message:
+                preview_text += f"\n{pool_sync_message}"
+            event_preview_variable.set(preview_text)
+
+        event_name_variable.trace_add("write", update_event_preview)
+        pool_name_variable.trace_add("write", update_event_preview)
+        update_event_preview()
 
         ttk.Label(
             content,
@@ -1661,11 +1984,15 @@ class SimpleApp:
         ttk.Button(
             actions,
             text="保存",
-            command=lambda: self.save_settings(entries, window),
+            command=lambda: self.save_settings(
+                entries,
+                window,
+                current_pool_name,
+            ),
         ).pack(side=tk.LEFT)
-        window.protocol("WM_DELETE_WINDOW", lambda: self.close_settings(window))
 
     def close_settings(self, window):
+        self.settings_load_id += 1
         if self.hotkey_listener is None:
             self.hotkey_listener = self.restore_hotkey_listener(
                 {
@@ -1739,13 +2066,14 @@ class SimpleApp:
         preview_label.pack(padx=12, pady=12)
         preview_window.transient(parent)
 
-    def save_settings(self, entries, window):
+    def save_settings(self, entries, window, current_pool_name):
         global event_name
         global hotkey_3x
         global hotkey_4x
         global hotkey_5x
         global hotkey_6x
         global hotkey_gacha10
+        global pool_name
         global target_monitor_id
         global user_name_list_file
 
@@ -1757,11 +2085,23 @@ class SimpleApp:
             )
             for key, entry in entries.items()
         }
-        required_keys = ("event_name", "target_monitor_id", "user_name_list_file")
+        required_keys = (
+            "event_name",
+            "pool_name",
+            "target_monitor_id",
+            "user_name_list_file",
+        )
         if any(values[key] is None or values[key] == "" for key in required_keys):
             messagebox.showwarning(
-                "无法保存", "活动名称、显示器和乘客名单文件必须填写。", parent=window
+                "无法保存",
+                "活动名称、卡池名称、显示器和乘客名单文件必须填写。",
+                parent=window,
             )
+            return
+        try:
+            compose_event_name(values["event_name"], values["pool_name"])
+        except ValueError as error:
+            messagebox.showwarning("无法保存", str(error), parent=window)
             return
         if not 0 <= values["target_monitor_id"] < len(capture.monitors):
             messagebox.showwarning(
@@ -1825,7 +2165,6 @@ class SimpleApp:
             with open(temporary_config_path, "w", encoding="utf-8") as config_file:
                 json.dump(updated_config, config_file, ensure_ascii=False, indent=4)
                 config_file.write("\n")
-            temporary_config_path.replace(CONFIG_PATH)
         except (OSError, json.JSONDecodeError) as error:
             if temporary_config_path.exists():
                 temporary_config_path.unlink()
@@ -1834,7 +2173,51 @@ class SimpleApp:
             messagebox.showerror("保存失败", f"无法更新 config.json：\n{error}", parent=window)
             return
 
+        try:
+            set_current_pool(
+                client,
+                set_current_pool_api_url,
+                login_token,
+                values["pool_name"],
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            if temporary_config_path.exists():
+                temporary_config_path.unlink()
+            if new_listener is not None:
+                new_listener.stop()
+            messagebox.showerror(
+                "保存失败",
+                f"更新服务器直播页当前卡池失败：\n{error}",
+                parent=window,
+            )
+            return
+
+        try:
+            temporary_config_path.replace(CONFIG_PATH)
+        except OSError as error:
+            rollback_error = None
+            if current_pool_name != values["pool_name"]:
+                try:
+                    set_current_pool(
+                        client,
+                        set_current_pool_api_url,
+                        login_token,
+                        current_pool_name,
+                    )
+                except (httpx.HTTPError, ValueError) as caught_error:
+                    rollback_error = caught_error
+            if temporary_config_path.exists():
+                temporary_config_path.unlink()
+            if new_listener is not None:
+                new_listener.stop()
+            detail = f"无法更新 config.json：\n{error}"
+            if rollback_error is not None:
+                detail += f"\n回滚服务器当前卡池也失败：\n{rollback_error}"
+            messagebox.showerror("保存失败", detail, parent=window)
+            return
+
         event_name = values["event_name"]
+        pool_name = values["pool_name"]
         target_monitor_id = values["target_monitor_id"]
         user_name_list_file = values["user_name_list_file"]
         hotkey_gacha10 = new_hotkeys["hotkey_gacha10"]
@@ -1843,8 +2226,9 @@ class SimpleApp:
         hotkey_5x = new_hotkeys["hotkey_5x"]
         hotkey_6x = new_hotkeys["hotkey_6x"]
         config.clear()
-        config.update(values)
+        config.update(updated_config)
         self.event_name = event_name
+        self.pool_name = pool_name
         self.hotkey_listener = new_listener
         self.settings_window = None
         self.update_hotkey_labels(new_hotkeys)
@@ -2180,7 +2564,7 @@ class SimpleApp:
     def enqueue_gacha_result(self, count, character_list):
         gacha_index = self.gacha_index
         self.upload_queue.submit(
-            event_name=self.event_name,
+            event_name=self.full_event_name,
             nickname=self.entry_nickname.get(),
             count=count,
             gacha_index=gacha_index,
@@ -2261,7 +2645,7 @@ if __name__ == "__main__":
     print('将截取显示器 {}'.format(target_monitor_id))
 
     print('正在启动程序本体')
-    app = SimpleApp(event_name, user_name_list)
+    app = SimpleApp(event_name, pool_name, user_name_list)
 
     try:
         hotkey_listener = app.create_hotkey_listener(
