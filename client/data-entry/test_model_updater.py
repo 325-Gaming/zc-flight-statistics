@@ -20,6 +20,34 @@ from model_updater import (  # noqa: E402
 
 
 class ModelUpdaterTests(unittest.TestCase):
+    def test_keras_cache_does_not_prevent_downloading_onnx(self):
+        files = {
+            "image_type": b"onnx-image-model",
+            "gacha10": b"onnx-gacha-model",
+            "operators": "能天使\n推进之王\n".encode(),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, self._client(files) as client:
+            models_dir = pathlib.Path(temp_dir)
+            old_models = {}
+            for name in ("image_type", "gacha10"):
+                (models_dir / f"{name}.keras").write_bytes(b"old-keras")
+                old_models[name] = {
+                    "version": "2099.01.01.1",
+                    "sha256": hashlib.sha256(b"old-keras").hexdigest(),
+                    "size": len(b"old-keras"),
+                }
+            (models_dir / "manifest.json").write_text(json.dumps({
+                "schema_version": 1, "models": old_models,
+            }), encoding="utf-8")
+            results = update_models(
+                "https://example.test/api/gachalog-zc/get-model-manifest",
+                models_dir, "1.0.0", login_token="test-token", client=client,
+            )
+            for name in ("image_type", "gacha10"):
+                self.assertEqual(results[name].status, "downloaded")
+                self.assertEqual((models_dir / f"{name}.onnx").read_bytes(), files[name])
+                self.assertEqual((models_dir / f"{name}.keras").read_bytes(), b"old-keras")
+
     def test_formats_download_status(self):
         status = _format_download_status(
             "gacha10",
@@ -38,7 +66,7 @@ class ModelUpdaterTests(unittest.TestCase):
 
     def test_formats_download_complete(self):
         status = _format_download_complete(
-            "gacha10.keras",
+            "gacha10.onnx",
             32 * MEBIBYTE,
             10,
             16,
@@ -47,7 +75,7 @@ class ModelUpdaterTests(unittest.TestCase):
 
         self.assertEqual(
             status,
-            "完成 gacha10.keras     32.00 MiB  用时 00:10  平均    3.20 MiB/s",
+            "完成 gacha10.onnx      32.00 MiB  用时 00:10  平均    3.20 MiB/s",
         )
 
     def _client(self, files, versions=None, corrupt_download=False):
@@ -93,7 +121,7 @@ class ModelUpdaterTests(unittest.TestCase):
             )
 
             self.assertEqual(results["image_type"].status, "downloaded")
-            self.assertEqual((models_dir / "image_type.keras").read_bytes(), files["image_type"])
+            self.assertEqual((models_dir / "image_type.onnx").read_bytes(), files["image_type"])
             self.assertEqual(
                 (models_dir / "operators.txt").read_bytes(), files["operators"]
             )
@@ -124,8 +152,8 @@ class ModelUpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             models_dir = pathlib.Path(temp_dir)
             for name, filename in {
-                "image_type": "image_type.keras",
-                "gacha10": "gacha10.keras",
+                "image_type": "image_type.onnx",
+                "gacha10": "gacha10.onnx",
                 "operators": "operators.txt",
             }.items():
                 (models_dir / filename).write_bytes(files[name])
@@ -150,7 +178,7 @@ class ModelUpdaterTests(unittest.TestCase):
             files, corrupt_download=True
         ) as client:
             models_dir = pathlib.Path(temp_dir)
-            old_model = models_dir / "image_type.keras"
+            old_model = models_dir / "image_type.onnx"
             old_model.write_bytes(b"old-image")
 
             with self.assertRaises(ValueError):

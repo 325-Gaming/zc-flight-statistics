@@ -3,4 +3,4 @@ mss
 numpy
 Pillow
 python-dotenv
-tensorflow
+onnxruntime==1.23.2

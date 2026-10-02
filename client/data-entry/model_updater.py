@@ -14,8 +14,8 @@ import httpx
 
 MANIFEST_SCHEMA_VERSION = 1
 DEFAULT_MODEL_FILES = {
-    "image_type": "image_type.keras",
-    "gacha10": "gacha10.keras",
+    "image_type": "image_type.onnx",
+    "gacha10": "gacha10.onnx",
     "operators": "operators.txt",
 }
 MEBIBYTE = 1024 * 1024
@@ -291,7 +291,11 @@ def update_models(
             if local_version:
                 local_key = _version_key(local_version)
                 remote_key = _version_key(version)
-                if remote_key < local_key:
+                if (
+                    remote_key < local_key
+                    and actual_sha256 is not None
+                    and actual_sha256 == local.get("sha256")
+                ):
                     results[name] = ModelUpdateResult(name, local_version, "kept-newer-local")
                     continue
 

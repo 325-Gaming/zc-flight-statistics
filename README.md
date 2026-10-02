@@ -42,15 +42,15 @@ client/data-entry/
 ├── test_model_updater.py        # 模型更新测试
 ├── favicon.ico                  # 窗口图标
 └── models/
-    ├── image_type.keras         # 画面类型识别模型
-    ├── gacha10.keras            # 十连干员识别模型
+    ├── image_type.onnx         # 画面类型识别模型
+    ├── gacha10.onnx            # 十连干员识别模型
     ├── operators.txt            # 与十连模型配套的有序干员类别表
     └── manifest.json            # 本地模型版本清单
 ```
 
 `config.json`、`name.csv` 和 `.env` 属于本地用户配置，不会提交至 Git。程序首次启动时会根据对应模板自动创建这些文件。
 
-`models` 目录会被 Git 保留，但其中的模型、干员类别表和本地版本清单不会提交。客户端启动时会从服务器获取模型清单；下载完成并通过文件大小和 SHA-256 校验后，才会替换本地文件。`operators.txt` 与 `gacha10.keras` 配套，由模型训练项目维护并经服务器分发，不在客户端项目中单独维护。服务器临时不可用时会继续使用已有文件；首次运行且本地没有模型或类别表时，需要能够连接模型服务。
+`models` 目录会被 Git 保留，但其中的模型、干员类别表和本地版本清单不会提交。客户端启动时会从服务器获取模型清单；下载完成并通过文件大小和 SHA-256 校验后，才会替换本地文件。`operators.txt` 与 `gacha10.onnx` 配套，由模型训练项目维护并经服务器分发，不在客户端项目中单独维护。服务器临时不可用时会继续使用已有文件；首次运行且本地没有模型或类别表时，需要能够连接模型服务。
 
 #### 安装
 
@@ -59,7 +59,7 @@ client/data-entry/
 适用于 Windows 10/11 **Intel/AMD 64 位**电脑，无需预装 Python、Git 或 Conda。
 
 1. 下载并解压本仓库，或取得完整的 `client/data-entry` 文件夹，将它放在固定、可写且路径较短的位置，例如 `C:\ZcFlight\data-entry`。不要直接在压缩包内运行，也不要放在 `Program Files` 下。
-2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。TensorFlow 下载较大，需要保持网络连接。
+2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。识别使用 CPU 版 ONNX Runtime，无需安装 TensorFlow。
 3. 用记事本打开同目录的 `.env`，将 `ZCFLIGHT_LOGIN_TOKEN=replace-me` 中的占位值替换为真实 token 并保存。已有 `.env` 不会被覆盖。
 4. 双击 `start.bat`，或桌面上的 **Zc航空抽卡统计数据录入** 快捷方式。首次启动会下载识别模型；进入“文件 → 设置…”选择当前活动和显示器。
 
@@ -74,9 +74,9 @@ client/data-entry/
 
 直接运行 `install.ps1` 时同样支持 `-IndexUrl`，可以填写其他 HTTPS 软件包索引地址（不支持在 URL 中包含账号密码、查询参数或片段）。安装窗口和日志会显示所选源；该选项仅作用于本次安装，不修改全局 pip/uv 配置，也不混用终端环境变量中的额外索引。如果镜像不可用或尚未同步所需版本，可显式指定官方源后重试。
 
-这里未采用自动测速：索引页面的响应时间不能可靠代表 TensorFlow 等大文件的下载速度。软件包源选项只影响 Python 依赖，uv、Python 本体及微软运行库仍从原下载地址获取；识别模型仍由客户端从模型服务下载。
+这里未采用自动测速：索引页面的响应时间不能可靠代表 依赖文件的下载速度。软件包源选项只影响 Python 依赖，uv、Python 本体及微软运行库仍从原下载地址获取；识别模型仍由客户端从模型服务下载。
 
-运行环境保存在 `client/data-entry/.runtime/` 和 `.venv/`，不会修改系统 PATH、系统 Python 或 Conda 环境。`config.json`、`.env`、`name.csv` 和 `models/` 仍保存在客户端目录，可单独备份。安装完成前会检查依赖、TensorFlow 和 Tk 图形界面；此步骤不会连接业务接口或上传数据。
+运行环境保存在 `client/data-entry/.runtime/` 和 `.venv/`，不会修改系统 PATH、系统 Python 或 Conda 环境。`config.json`、`.env`、`name.csv` 和 `models/` 仍保存在客户端目录，可单独备份。安装完成前会检查依赖、ONNX Runtime 和 Tk 图形界面；此步骤不会连接业务接口或上传数据。
 
 后续更新代码后，先关闭客户端，再运行 `install.bat` 补齐依赖；脚本可重复执行，不会覆盖已有配置、名单或模型。它不负责自动更新客户端代码。不要移动已经安装的目录：虚拟环境和桌面快捷方式依赖原路径。如果需要迁移，先关闭客户端，复制整个目录，删除新位置的 `.venv/` 和 `.runtime/`，再重新安装；保留 `.env`、配置、名单及模型。
 
@@ -202,8 +202,8 @@ python3 client/data-entry/main.py
 如果模型服务暂时不可用，则需要确认 `client/data-entry/models/` 中已有以下文件：
 
 ```text
-image_type.keras
-gacha10.keras
+image_type.onnx
+gacha10.onnx
 operators.txt
 ```
 
@@ -230,3 +230,11 @@ operators.txt
 - [x] 客户端增加切换前端页面主题样式功能
 - [ ] 支持自动热更新同名主题 CSS 文件
 - [ ] 完善客户端打包和发布流程
+
+### 从 TensorFlow 客户端升级
+
+先关闭客户端，再运行 `install.bat` 安装 ONNX Runtime。首次启动需要联网下载
+`image_type.onnx`、`gacha10.onnx` 及配套 `operators.txt`；旧 `.keras` 文件不能作为离线回退模型。
+安装器不会自动卸载旧依赖。需要释放旧 TensorFlow 环境占用时，关闭客户端后删除本客户端
+目录下的 `.venv/`，再运行 `install.bat` 重建；保留 `.runtime/`、`.env`、配置、名单和 `models/`。
+确认 ONNX 模型工作正常后，可自行删除 `models/` 中不再使用的两个 `.keras` 文件。

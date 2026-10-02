@@ -136,7 +136,7 @@ print(sys.executable)
         Invoke-Checked $uvExe @('venv', '--no-config', '--managed-python', '--python', '3.11', $venvDir)
     }
 
-    Write-Host '[4/5] Installing dependencies (TensorFlow may take several minutes)...'
+    Write-Host '[4/5] Installing dependencies (ONNX Runtime)...'
     Write-Host "Package index: $IndexUrl"
     Invoke-Checked $uvExe @('pip', 'install', '--no-config', '--python', $pythonExe,
         '--default-index', $IndexUrl, '--only-binary', ':all:',
@@ -150,9 +150,8 @@ import numpy
 import tkinter
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Softmax
-from tensorflow.keras.models import load_model
+import onnxruntime
+assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()
 root = tkinter.Tk()
 root.withdraw()
 root.destroy()

@@ -1,14 +1,10 @@
-# import tensorflow as tf
-from tensorflow.keras import Sequential
-from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import Softmax
-
 import datetime
 import httpx
 import json
 import mss
 from mss.exception import ScreenShotError
 import numpy as np
+import onnxruntime as ort
 import os
 import pathlib
 import queue
@@ -130,8 +126,8 @@ print('当前活动 {}'.format(compose_event_name(event_name, pool_name)))
 
 
 
-model_image_type_path = BASE_DIR / 'models/image_type.keras'
-model_gacha10_path = BASE_DIR / 'models/gacha10.keras'
+model_image_type_path = BASE_DIR / 'models/image_type.onnx'
+model_gacha10_path = BASE_DIR / 'models/gacha10.onnx'
 
 submit_gacha_log_api_url = 'https://yubo.run/api/gachalog-zc/submit'
 set_current_user_api_url = os.getenv(
@@ -285,20 +281,15 @@ for result in model_update_results.values():
     print(f'模型 {result.name}: {result.version} ({result.status})')
 
 
-# model_image_type = tf.keras.models.load_model(model_image_type_path)
-# model_gacha10 = tf.keras.models.load_model(model_gacha10_path)
-model_image_type = load_model(model_image_type_path)
-model_gacha10 = load_model(model_gacha10_path)
+model_image_type = ort.InferenceSession(
+    str(model_image_type_path), providers=['CPUExecutionProvider']
+)
+model_gacha10 = ort.InferenceSession(
+    str(model_gacha10_path), providers=['CPUExecutionProvider']
+)
 print('load model', model_image_type_path)
 print('load model', model_gacha10_path)
-# probability_model_image_type = tf.keras.Sequential([model_image_type, tf.keras.layers.Softmax()])
-# probability_model_gacha10 = tf.keras.Sequential([model_gacha10, tf.keras.layers.Softmax()])
-probability_model_image_type = Sequential([model_image_type, Softmax()])
-probability_model_gacha10 = Sequential([model_gacha10, Softmax()])
 
-# Check its architecture
-# model_image_type.summary()
-# model_gacha10.summary()
 
 type_id_name = [
     ['0', 'other'],
@@ -398,7 +389,10 @@ def capture_and_predict():
     val_images = np.stack([image_array], axis=0)
     # print(f"最终数组形状: {val_images.shape}")
 
-    predictions = probability_model_image_type.predict(val_images)
+    predictions = model_image_type.run(
+        None,
+        {model_image_type.get_inputs()[0].name: np.ascontiguousarray(val_images, dtype=np.float32)},
+    )[0]
     # print(type_id_to_name[np.argmax(predictions[0])])
     # if type_id_to_name[np.argmax(predictions[0])] == 'other':
     if np.argmax(predictions[0]) == 0:
@@ -410,10 +404,12 @@ def capture_and_predict():
     if np.argmax(predictions[0]) == 2:
         print('这是十连.jpg')
         operator_image_list = seperate_image_gacha10(image_16_9)
-        val_images = np.empty([10, 64, 32, 3])
+        val_images = np.empty([10, 64, 32, 3], dtype=np.float32)
         for i in range(10):
             val_images[i] = operator_image_list[i]
-        predictions_gacha10 = probability_model_gacha10.predict(val_images)
+        predictions_gacha10 = model_gacha10.run(
+            None, {model_gacha10.get_inputs()[0].name: val_images}
+        )[0]
         print('截图及识别用时: {:.2f}s'.format(time.time() - t0))
         result = [operator_id_to_name[np.argmax(predictions_gacha10[i])] for i in range(10)]
         print(result)
