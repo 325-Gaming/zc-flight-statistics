@@ -72,7 +72,7 @@ class PagePoolSettingsTests(unittest.TestCase):
                 200,
                 json={
                     "current_pool_name": "当前卡池",
-                    "pool_names": ["最新卡池", "当前卡池", "旧卡池"],
+                    "pool_name_list": ["最新卡池", "当前卡池", "旧卡池"],
                 },
             )
 
@@ -85,7 +85,7 @@ class PagePoolSettingsTests(unittest.TestCase):
 
         self.assertEqual(result["current_pool_name"], "当前卡池")
         self.assertEqual(
-            result["pool_names"],
+            result["pool_name_list"],
             ("最新卡池", "当前卡池", "旧卡池"),
         )
 
@@ -116,7 +116,7 @@ class PagePoolSettingsTests(unittest.TestCase):
                     200,
                     json={
                         "current_pool_name": "卡池",
-                        "pool_names": ["卡池", "卡池"],
+                        "pool_name_list": ["卡池", "卡池"],
                     },
                 )
             )

@@ -49,7 +49,7 @@ from page_pool_settings import (
 )
 from page_style_settings import (
     DEFAULT_PAGE_STYLE,
-    get_available_page_styles,
+    get_available_page_style_list,
     select_available_page_style,
 )
 
@@ -1340,20 +1340,20 @@ class SimpleApp:
                 get_page_display_api_url,
                 login_token,
             )
-            available_page_styles = get_available_page_styles(
+            available_page_style_list = get_available_page_style_list(
                 client,
                 get_page_style_list_api_url,
             )
         except (httpx.HTTPError, ValueError) as error:
             current_settings = None
-            available_page_styles = None
+            available_page_style_list = None
             request_error = error
         self.background_results.put(
             (
                 "page_display_settings",
                 load_id,
                 current_settings,
-                available_page_styles,
+                available_page_style_list,
                 request_error,
             )
         )
@@ -1362,7 +1362,7 @@ class SimpleApp:
         self,
         load_id,
         current_settings,
-        available_page_styles,
+        available_page_style_list,
         error,
     ):
         window = self.page_display_settings_window
@@ -1384,7 +1384,7 @@ class SimpleApp:
         configured_page_style = current_settings["page_style"]
         current_page_style = select_available_page_style(
             configured_page_style,
-            available_page_styles,
+            available_page_style_list,
         )
         unavailable_page_style_message = ""
         if current_page_style != configured_page_style:
@@ -1475,7 +1475,7 @@ class SimpleApp:
         ttk.Combobox(
             content,
             textvariable=page_style_variable,
-            values=available_page_styles,
+            values=available_page_style_list,
             state="readonly",
             width=24,
         ).grid(row=4, column=1, sticky="ew")
@@ -1791,14 +1791,14 @@ class SimpleApp:
             )
             return
 
-        pool_names = pool_settings["pool_names"]
+        pool_name_list = pool_settings["pool_name_list"]
         current_pool_name = pool_settings["current_pool_name"]
         configured_event_name = str(current_config.get("event_name", "")).strip()
         configured_pool_name = str(current_config.get("pool_name", "")).strip()
         selected_pool_name = select_initial_pool_name(
             configured_pool_name,
             current_pool_name,
-            pool_names,
+            pool_name_list,
         )
 
         for child in window.winfo_children():
@@ -1859,7 +1859,7 @@ class SimpleApp:
                 pool_selector = ttk.Combobox(
                     content,
                     textvariable=pool_name_variable,
-                    values=pool_names,
+                    values=pool_name_list,
                     state="readonly",
                 )
                 pool_selector.grid(row=row, column=1, sticky="ew", pady=6)
@@ -1941,7 +1941,7 @@ class SimpleApp:
                 configured_pool_name,
                 current_pool_name,
                 selected_pool_name,
-                pool_names,
+                pool_name_list,
             )
             preview_text = f"完整活动名称预览：{full_event_name}"
             if pool_sync_message:

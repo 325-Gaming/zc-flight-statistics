@@ -3,24 +3,24 @@ import unittest
 import httpx
 
 from page_style_settings import (
-    get_available_page_styles,
+    get_available_page_style_list,
     normalize_page_style_name,
     select_available_page_style,
 )
 
 
 class PageStyleSettingsTests(unittest.TestCase):
-    def test_get_available_page_styles_adds_default_and_removes_duplicates(self):
+    def test_get_available_page_style_list_adds_default_and_removes_duplicates(self):
         def handler(request):
             self.assertEqual(request.method, "GET")
             self.assertNotIn("authorization", request.headers)
             return httpx.Response(
                 200,
-                json={"page_styles": ["sunset", "sunset"]},
+                json={"page_style_list": ["sunset", "sunset"]},
             )
 
         with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-            result = get_available_page_styles(
+            result = get_available_page_style_list(
                 http_client,
                 "https://example.test/get-page-style-list",
             )
@@ -32,12 +32,12 @@ class PageStyleSettingsTests(unittest.TestCase):
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
                     200,
-                    json={"page_styles": ["../classic"]},
+                    json={"page_style_list": ["../classic"]},
                 )
             )
         ) as http_client:
             with self.assertRaisesRegex(ValueError, "样式名称无效"):
-                get_available_page_styles(
+                get_available_page_style_list(
                     http_client,
                     "https://example.test/get-page-style-list",
                 )
