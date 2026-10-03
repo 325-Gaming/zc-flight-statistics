@@ -46,6 +46,7 @@ class GachaUploadQueue:
         retry_delay=0.5,
         on_success=None,
         on_failure=None,
+        daemon=False,
     ):
         if max_attempts < 1:
             raise ValueError("max_attempts 必须大于等于 1")
@@ -66,7 +67,7 @@ class GachaUploadQueue:
         self._worker = threading.Thread(
             target=self._run,
             name="gacha-upload",
-            daemon=False,
+            daemon=daemon,
         )
         self._worker.start()
 
@@ -130,13 +131,14 @@ class GachaUploadQueue:
                 raise RuntimeError("上传队列已经关闭")
             self._queue.put(task)
 
-    def close(self, wait=True):
+    def close(self, wait=True, timeout=None):
         with self._lock:
             if not self._closed:
                 self._closed = True
                 self._queue.put(self._sentinel)
         if wait and self._worker is not threading.current_thread():
-            self._worker.join()
+            self._worker.join(timeout=timeout)
+        return not self._worker.is_alive()
 
     @property
     def pending_count(self):

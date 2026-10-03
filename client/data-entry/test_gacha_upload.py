@@ -1,4 +1,5 @@
 import json
+import threading
 import unittest
 
 import httpx
@@ -129,6 +130,27 @@ class GachaUploadQueueTests(unittest.TestCase):
             upload_queue.close()
             with self.assertRaisesRegex(RuntimeError, "已经关闭"):
                 upload_queue.submit("event", "user", 1, 1, [])
+
+    def test_bounded_shutdown_when_upload_is_blocked(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def handler(_request):
+            started.set()
+            release.wait(timeout=2)
+            return httpx.Response(200)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            upload_queue = GachaUploadQueue(
+                client, "https://example.test", "token", daemon=True,
+            )
+            try:
+                upload_queue.submit("event", "user", 1, 1, ["三星干员"])
+                self.assertTrue(started.wait(timeout=1))
+                self.assertFalse(upload_queue.close(wait=True, timeout=0.01))
+            finally:
+                release.set()
+                self.assertTrue(upload_queue.close(wait=True, timeout=2))
 
 
 if __name__ == "__main__":

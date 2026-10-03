@@ -8,7 +8,7 @@
 
 **路径：** `client/data-entry`
 
-Zc航空抽卡统计数据录入客户端。程序会截取指定显示器，使用 TensorFlow 模型识别抽卡画面和干员，然后将结果提交至统计接口。
+Zc航空抽卡统计数据录入客户端。程序会截取指定显示器，使用 ONNX 模型识别抽卡画面和干员，然后将结果提交至统计接口。操作界面由 WebView 显示。
 
 #### 功能
 
@@ -30,7 +30,9 @@ Zc航空抽卡统计数据录入客户端。程序会截取指定显示器，使
 ```text
 CHANGELOG.md                     # 版本更新记录
 client/data-entry/
-├── main.py                      # 程序入口
+├── main.py                      # 识别与原有 Tk 界面
+├── webview_app.py               # WebView 程序入口及 Python 交互层
+├── webview_ui/                  # 页面、控件样式及随客户端提供的主题
 ├── version.py                   # 客户端版本号
 ├── hotkeys.py                   # 跨平台全局快捷键
 ├── model_updater.py             # 识别模型更新工具
@@ -59,11 +61,11 @@ client/data-entry/
 适用于 Windows 10/11 **Intel/AMD 64 位**电脑，无需预装 Python、Git 或 Conda。
 
 1. 下载并解压本仓库，或取得完整的 `client/data-entry` 文件夹，将它放在固定、可写且路径较短的位置，例如 `C:\ZcFlight\data-entry`。不要直接在压缩包内运行，也不要放在 `Program Files` 下。
-2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。识别使用 CPU 版 ONNX Runtime，无需安装 TensorFlow。
+2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。识别使用 CPU 版 ONNX Runtime，界面使用 WebView2，无需安装 TensorFlow。
 3. 用记事本打开同目录的 `.env`，将 `ZCFLIGHT_LOGIN_TOKEN=replace-me` 中的占位值替换为真实 token 并保存。已有 `.env` 不会被覆盖。
 4. 双击 `start.bat`，或桌面上的 **Zc航空抽卡统计数据录入** 快捷方式。首次启动会下载识别模型；进入“文件 → 设置…”选择当前活动和显示器。
 
-安装器会检查 Microsoft Visual C++ 运行库；缺失时下载并验证微软签名，随后请求 Windows 管理员授权进行安装。如提示重启，请重启系统后再次运行 `install.bat`。Python 和应用依赖的安装不需要管理员权限。
+安装器会检查 Microsoft Visual C++ 运行库；缺失时下载并验证微软签名，随后请求 Windows 管理员授权进行安装。还会检查 Microsoft Edge WebView2 Runtime；缺失时先从微软官方页面安装，再重新运行 `install.bat`。如提示重启，请重启系统后再次运行安装器。Python 和应用依赖的安装不需要管理员权限。
 
 **指定软件包源：** 双击安装默认使用清华源，也可以在客户端目录打开终端后指定中科大源或官方 PyPI：
 
@@ -76,7 +78,7 @@ client/data-entry/
 
 这里未采用自动测速：索引页面的响应时间不能可靠代表 依赖文件的下载速度。软件包源选项只影响 Python 依赖，uv、Python 本体及微软运行库仍从原下载地址获取；识别模型仍由客户端从模型服务下载。
 
-运行环境保存在 `client/data-entry/.runtime/` 和 `.venv/`，不会修改系统 PATH、系统 Python 或 Conda 环境。`config.json`、`.env`、`name.csv` 和 `models/` 仍保存在客户端目录，可单独备份。安装完成前会检查依赖、ONNX Runtime 和 Tk 图形界面；此步骤不会连接业务接口或上传数据。
+运行环境保存在 `client/data-entry/.runtime/` 和 `.venv/`，不会修改系统 PATH、系统 Python 或 Conda 环境。`config.json`、`.env`、`name.csv` 和 `models/` 仍保存在客户端目录，可单独备份。安装完成前会检查依赖、ONNX Runtime 和 WebView2 Runtime；此步骤不会连接业务接口或上传数据。
 
 后续更新代码后，先关闭客户端，再运行 `install.bat` 补齐依赖；脚本可重复执行，不会覆盖已有配置、名单或模型。它不负责自动更新客户端代码。不要移动已经安装的目录：虚拟环境和桌面快捷方式依赖原路径。如果需要迁移，先关闭客户端，复制整个目录，删除新位置的 `.venv/` 和 `.runtime/`，再重新安装；保留 `.env`、配置、名单及模型。
 
@@ -171,8 +173,10 @@ ZCFLIGHT_RESTORE_GACHA_URL=http://localhost:8000/api/gachalog-zc/restore
 可以从仓库根目录直接启动：
 
 ```bash
-python3 client/data-entry/main.py
+python3 client/data-entry/webview_app.py
 ```
+
+客户端只随包提供 `classic.css`；其余主题从服务端加载，并须提供完整的客户端控件变量。同名时仍优先使用随包主题，所以 `classic` 始终使用本地文件。直播页面设置中的主题选择继续使用现有接口；若远程主题缺少客户端控件变量，客户端会回退到 `classic`。旧的 `main.py` 仍可单独启动 Tk 界面，用于迁移期间排查问题。
 
 启动后：
 

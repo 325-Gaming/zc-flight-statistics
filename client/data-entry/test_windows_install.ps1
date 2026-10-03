@@ -18,6 +18,7 @@ try {
         Get-ChildItem -LiteralPath $PSScriptRoot -Filter $pattern -File -Force |
             Copy-Item -Destination $testDir
     }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'webview_ui') -Destination $testDir -Recurse
     $installer = Join-Path $testDir 'install.ps1'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -NoShortcut
     if ($LASTEXITCODE -ne 0) { throw 'Fresh installation failed.' }

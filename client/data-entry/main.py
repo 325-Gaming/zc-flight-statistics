@@ -416,7 +416,7 @@ def capture_and_predict():
         with open(BASE_DIR / 'output.txt', 'w', encoding='utf-8') as f:
             f.write(' '.join(result))
         text = ' '.join(result)
-        app.label.config(text=text)
+        app.show_result(text)
         app.enqueue_gacha_result(
             count=10,
             character_list=result,
@@ -481,6 +481,9 @@ class SimpleApp:
         self.root.after(100, self._process_background_results)
 
         self.new_user()
+
+    def show_result(self, text):
+        self.label.config(text=text)
 
     @property
     def full_event_name(self):

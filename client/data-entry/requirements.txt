@@ -4,3 +4,4 @@ numpy
 Pillow
 python-dotenv
 onnxruntime==1.23.2
+pywebview==6.2.1

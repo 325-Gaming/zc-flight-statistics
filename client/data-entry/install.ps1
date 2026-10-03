@@ -46,10 +46,25 @@ try {
     if ([Environment]::OSVersion.Version.Major -lt 10) {
         throw 'Windows 10 or later is required.'
     }
-    foreach ($required in @('main.py', 'requirements.txt', '.env.example',
+    foreach ($required in @('main.py', 'webview_app.py', 'requirements.txt', '.env.example',
         'config.example.json', 'name.example.csv', 'start.bat', 'favicon.ico')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required) -PathType Leaf)) {
             throw "Missing $required. Extract the entire data-entry directory first."
+        }
+    }
+    foreach ($requiredUi in @(
+        'index.html', 'app.css', 'app.js',
+        'themes\classic.css',
+        'fonts\fusion-pixel-12px-proportional-zh_hans.otf.woff2',
+        'fonts\fusion-pixel-12px-proportional-ja.otf.woff2',
+        'fonts\fusion-pixel-12px-proportional-latin.otf.woff2',
+        'licenses\OFL.txt',
+        'licenses\LICENSES\ark-pixel\OFL.txt',
+        'licenses\LICENSES\cubic-11\OFL.txt',
+        'licenses\LICENSES\galmuri\LICENSE.txt'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $PSScriptRoot 'webview_ui') $requiredUi) -PathType Leaf)) {
+            throw "Missing webview_ui\$requiredUi. Extract the entire data-entry directory first."
         }
     }
     New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
@@ -117,6 +132,26 @@ try {
         }
     }
 
+    # Both machine-wide and per-user Evergreen WebView2 Runtime are supported.
+    $webViewClient = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+    $webViewRegistryPaths = @(
+        "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$webViewClient",
+        "Registry::HKEY_CURRENT_USER\Software\Microsoft\EdgeUpdate\Clients\$webViewClient"
+    )
+    $webViewInstalled = $false
+    foreach ($registryPath in $webViewRegistryPaths) {
+        if (Test-Path -LiteralPath $registryPath) {
+            $registryItem = Get-ItemProperty -LiteralPath $registryPath -Name pv -ErrorAction SilentlyContinue
+            if ($null -ne $registryItem -and $registryItem.pv -and $registryItem.pv -ne '0.0.0.0') {
+                $webViewInstalled = $true
+                break
+            }
+        }
+    }
+    if (-not $webViewInstalled) {
+        throw 'Microsoft Edge WebView2 Runtime is required. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and rerun install.bat.'
+    }
+
     Write-Host '[3/5] Preparing an isolated Python 3.11 environment...'
     if (Test-Path -LiteralPath $venvDir) {
         if (-not (Test-Path -LiteralPath $pythonExe)) {
@@ -136,7 +171,7 @@ print(sys.executable)
         Invoke-Checked $uvExe @('venv', '--no-config', '--managed-python', '--python', '3.11', $venvDir)
     }
 
-    Write-Host '[4/5] Installing dependencies (ONNX Runtime)...'
+    Write-Host '[4/5] Installing dependencies (ONNX Runtime and WebView)...'
     Write-Host "Package index: $IndexUrl"
     Invoke-Checked $uvExe @('pip', 'install', '--no-config', '--python', $pythonExe,
         '--default-index', $IndexUrl, '--only-binary', ':all:',
@@ -147,17 +182,14 @@ print(sys.executable)
 import httpx
 import mss
 import numpy
-import tkinter
-from PIL import Image, ImageTk
+import webview
+from PIL import Image
 from dotenv import load_dotenv
 import onnxruntime
 assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()
-root = tkinter.Tk()
-root.withdraw()
-root.destroy()
 with httpx.Client(http2=True):
     pass
-print('Python, dependencies and Tk GUI checks passed.')
+print('Python, ONNX and WebView dependencies passed.')
 '@
     Invoke-Checked $pythonExe @('-c', $smokeTest)
 

@@ -9,7 +9,7 @@ if not exist "%~dp0.venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-"%~dp0.venv\Scripts\python.exe" -u "%~dp0main.py"
+"%~dp0.venv\Scripts\python.exe" -u "%~dp0webview_app.py"
 set "app_result=%errorlevel%"
 if not "%app_result%"=="0" (
     echo.
