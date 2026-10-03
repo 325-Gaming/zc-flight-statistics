@@ -56,6 +56,11 @@ async function api(name, payload = {}) {
   return response.data;
 }
 
+function closeMenus() {
+  appElement.querySelectorAll('.menu-popover').forEach(popover => popover.hidden = true);
+  selectedMenu = null;
+}
+
 async function applyTheme(name) {
   const sequence = ++themeSequence;
   const safeName = /^[a-z0-9][a-z0-9_-]{0,63}$/.test(name) ? name : 'classic';
@@ -141,7 +146,7 @@ function renderMain() {
   });
   appElement.querySelectorAll('[data-menu-action]').forEach(button => button.onclick = async () => {
     const action = button.dataset.menuAction;
-    selectedMenu = null;
+    closeMenus();
     if (action === 'exit') {
       if (await showDialog('退出', '确定退出客户端吗？', true)) await api('close');
     } else if (action === 'undo') {
@@ -387,10 +392,7 @@ window.receiveState = update => {
 };
 
 document.addEventListener('click', event => {
-  if (!event.target.closest('.menu-wrap')) {
-    document.querySelectorAll('.menu-popover').forEach(popover => popover.hidden = true);
-    selectedMenu = null;
-  }
+  if (!event.target.closest('.menu-wrap')) closeMenus();
 });
 
 document.addEventListener('keydown', async event => {
