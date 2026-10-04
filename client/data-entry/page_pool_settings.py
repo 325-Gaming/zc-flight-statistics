@@ -1,8 +1,10 @@
 """Helpers for reading and updating the live-page pool."""
 
+from flight_session import auth_headers
+
 
 def _authorization_headers(login_token):
-    return {"Authorization": f"Bearer {login_token}"}
+    return auth_headers(login_token)
 
 
 def _normalize_pool_settings(data):

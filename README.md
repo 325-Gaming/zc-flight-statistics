@@ -62,8 +62,8 @@ client/data-entry/
 
 1. 下载并解压本仓库，或取得完整的 `client/data-entry` 文件夹，将它放在固定、可写且路径较短的位置，例如 `C:\ZcFlight\data-entry`。不要直接在压缩包内运行，也不要放在 `Program Files` 下。
 2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。识别使用 CPU 版 ONNX Runtime，界面使用 WebView2，无需安装 TensorFlow。
-3. 用记事本打开同目录的 `.env`，将 `ZCFLIGHT_LOGIN_TOKEN=replace-me` 中的占位值替换为真实 token 并保存。已有 `.env` 不会被覆盖。
-4. 双击 `start.bat`，或桌面上的 **Zc航空抽卡统计数据录入** 快捷方式。首次启动会下载识别模型；进入“文件 → 设置…”选择当前活动和显示器。
+3. 双击 `start.bat`，或桌面上的 **Zc航空抽卡统计数据录入** 快捷方式。首次启动会打开羽bot个人中心登录页。使用有 `zc.flight_user` 权限的 QQ 或邮箱账号登录。
+4. 登录通过后客户端重新启动并下载识别模型；进入“文件 → 设置…”选择当前活动和显示器。
 
 安装器会检查 Microsoft Visual C++ 运行库；缺失时下载并验证微软签名，随后请求 Windows 管理员授权进行安装。还会检查 Microsoft Edge WebView2 Runtime；缺失时先从微软官方页面安装，再重新运行 `install.bat`。如提示重启，请重启系统后再次运行安装器。Python 和应用依赖的安装不需要管理员权限。
 
@@ -108,25 +108,25 @@ Windows PowerShell 激活虚拟环境：
 .venv\Scripts\Activate.ps1
 ```
 
-#### 配置认证信息
+#### 登录与认证
 
-程序首次启动时会根据 `.env.example` 自动创建 `client/data-entry/.env`，随后因为登录令牌仍是占位值而提示用户完成配置。也可以在首次启动前手动复制模板：
+客户端使用与 `https://yubo.run/user/` 相同的页面和登录流程。QQ 登录需按页面提示在群内发送验证码；邮箱登录需填写收到的邮件验证码。只有个人中心账号拥有当前有效的 `zc.flight_user` 额外权限时才会进入数据录入界面。服务端对每次受保护请求重新校验会话和权限；权限被撤销后，已有客户端的后续请求也会被拒绝。
+
+成功登录后，客户端把会话保存在本机用户目录下的受限文件：Windows 为 `%LOCALAPPDATA%\zc-flight-data-entry\session.json`，macOS/Linux 为 `~/.config/zc-flight-data-entry/session.json`。本地最多保留 7 天；服务端会话也最多有效 7 天。使用“文件 → 退出登录”会调用个人中心退出接口并删除本地文件；默认返回登录页面，勾选“同时退出客户端”则关闭程序。网络故障时仍删除本地文件，但服务端撤销须在恢复连接后由管理员核查。
+
+程序首次启动时会根据 `.env.example` 自动创建 `client/data-entry/.env`。该文件只用于可选的接口地址配置，不再填写固定登录 token。也可以在首次启动前手动复制模板：
 
 ```bash
 cp client/data-entry/.env.example client/data-entry/.env
 ```
 
-编辑 `client/data-entry/.env` 并填入真实 token：
-
-```dotenv
-ZCFLIGHT_LOGIN_TOKEN=replace-with-your-token
-```
-
-`.env` 已被 Git 忽略。不要将真实 token 写入源码、`.env.example` 或提交历史。
+`.env` 已被 Git 忽略。升级时可删除其中旧的 `ZCFLIGHT_LOGIN_TOKEN`；新客户端不会读取它。不要将个人中心会话或其他真实凭据写入配置模板、源码或提交历史。
 
 开发或自托管环境还可以在 `.env` 中覆盖以下接口地址：
 
 ```dotenv
+ZCFLIGHT_LOGIN_INFO_URL=http://localhost:8000/api/kusa/get-login-info
+ZCFLIGHT_LOGOUT_URL=http://localhost:8000/api/kusa/logout
 ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-manifest
 ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
 ZCFLIGHT_GET_POOL_LIST_URL=http://localhost:8000/api/gachalog-zc/get-pool-list
@@ -195,9 +195,9 @@ python3 client/data-entry/webview_app.py
 
 #### 常见问题
 
-##### 提示缺少 `ZCFLIGHT_LOGIN_TOKEN`
+##### 登录后仍无法进入客户端
 
-确认 `client/data-entry/.env` 存在，且包含非空的 `ZCFLIGHT_LOGIN_TOKEN`。
+检查当前账号是否有有效的 `zc.flight_user` 权限，及个人中心接口是否可达。无权限时，`get-login-info` 会省略 `permission_code_list`；客户端会把缺失字段当作空列表，不沿用旧权限。服务端鉴权不可用时会拒绝业务请求，不会放行旧固定 token。
 
 ##### 提示找不到模型
 
@@ -227,7 +227,7 @@ operators.txt
 - [x] 将识别与上传结果拆分执行，并将上传任务放入后台队列
 - [x] 客户端添加按钮，用于更新服务端中控制前端页面显示效果的记录
 - [x] 客户端增加撤销等操作历史上传的抽卡记录功能
-- [ ] 客户端接入 羽bot 本体，实现浏览器回跳登录
+- [x] 客户端接入羽bot本体，实现客户端内登录
 - [ ] 客户端允许多用户同时向同一卡池添加记录
 - [ ] 抽卡统计展示客户端
 - [x] 前端页面支持切换主题样式

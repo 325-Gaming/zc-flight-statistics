@@ -3,6 +3,7 @@
 import base64
 import io
 import json
+import os
 import pathlib
 import queue
 import signal
@@ -13,8 +14,13 @@ import httpx
 import webview
 from mss.exception import ScreenShotError
 
+if __name__ == "__main__":
+    from login_window import ensure_login
+    ensure_login()
+
 import main as core
 from event_settings import compose_event_name
+from flight_session import logout
 from gacha_history import format_gacha_position, get_gacha_history
 from gacha_upload import GachaMoveTask, GachaStateTask, GachaUploadQueue
 from hotkeys import register_hotkeys
@@ -112,6 +118,8 @@ class WebViewApp:
         self.predict_lock = threading.Lock()
         self.windows = {}
         self.closed = False
+        self.logged_out = False
+        self.relogin_requested = False
         self.settings_open = False
         self.hotkey_listener = None
         self.user_name_list = list(core.user_name_list)
@@ -524,6 +532,23 @@ class WebViewApp:
         return True
 
     def action(self, view, name, payload):
+        if name == "logout" and view == "main":
+            if self.logged_out:
+                raise RuntimeError("已退出登录，请关闭客户端")
+            if self.upload_queue.pending_count:
+                raise RuntimeError("还有上传任务未完成，请稍后再退出登录")
+            try:
+                result = logout(core.login_token, client=core.client)
+                revoked = isinstance(result, dict) and result.get("message") == "退出登录成功"
+            except (httpx.HTTPError, ValueError):
+                revoked = False
+            # flight_session.logout clears the local credential even if the request fails.
+            self.logged_out = True
+            self._stop_hotkeys()
+            self.upload_queue.close(wait=False)
+            return {"revoked": revoked}
+        if self.logged_out and name != "close":
+            raise RuntimeError("已退出登录，请关闭客户端")
         if name == "open":
             target = payload.get("view")
             if view != "main" or target not in WINDOWS or target == "main":
@@ -534,6 +559,8 @@ class WebViewApp:
             window = self.windows.get(view)
             if window is None:
                 return None
+            if view == "main" and self.logged_out:
+                self.relogin_requested = payload.get("relogin") is True
             # pywebview must deliver this bridge call's response before Cocoa
             # tears down the WKWebView, or its JS result thread can hang.
             timer = threading.Timer(0.2, window.destroy)
@@ -700,6 +727,8 @@ def main():
         )
     finally:
         app.finish_close()
+    if app.relogin_requested:
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ class PageDisplaySettingsTests(unittest.TestCase):
         self.settings.update(
             {
                 "bottom_info_identity_text": "乘客",
-                "bottom_info_text": "欢迎乘坐 Zc 航空",
+                "bottom_info_text": "欢迎乘坐Zc航空",
             }
         )
 

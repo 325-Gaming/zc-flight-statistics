@@ -46,7 +46,8 @@ try {
     if ([Environment]::OSVersion.Version.Major -lt 10) {
         throw 'Windows 10 or later is required.'
     }
-    foreach ($required in @('main.py', 'webview_app.py', 'requirements.txt', '.env.example',
+    foreach ($required in @('main.py', 'webview_app.py', 'flight_session.py', 'login_window.py',
+        'requirements.txt', '.env.example',
         'config.example.json', 'name.example.csv', 'start.bat', 'favicon.ico')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required) -PathType Leaf)) {
             throw "Missing $required. Extract the entire data-entry directory first."
@@ -177,7 +178,7 @@ print(sys.executable)
         '--default-index', $IndexUrl, '--only-binary', ':all:',
         '-r', (Join-Path $PSScriptRoot 'requirements.txt'))
     Invoke-Checked $uvExe @('pip', 'check', '--no-config', '--python', $pythonExe)
-    # Do not import main.py: it contacts the service and requires a real token.
+    # Do not import main.py: it contacts the model service during startup.
     $smokeTest = @'
 import httpx
 import mss
@@ -214,8 +215,8 @@ print('Python, ONNX and WebView dependencies passed.')
         }
     }
     Write-Host 'Installation complete. Existing configuration and models were preserved.'
-    Write-Host 'Before the first launch, edit .env and replace ZCFLIGHT_LOGIN_TOKEN=replace-me with your token.'
-    Write-Host 'Then double-click start.bat or the desktop shortcut. Models download on first launch.'
+    Write-Host 'Double-click start.bat or the desktop shortcut, then log in through the Yubo personal center.'
+    Write-Host 'Models download after login on first launch.'
     Write-Host 'Keep this directory in place. Close the client before rerunning the installer.'
 } catch {
     Write-Host "Installation failed: $($_.Exception.Message)" -ForegroundColor Red

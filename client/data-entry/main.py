@@ -31,6 +31,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from event_settings import compose_event_name
+from flight_session import auth_headers, load_session
 from hotkeys import register_hotkeys
 from page_display_settings import (
     PAGE_ACTIVITY_ITEM,
@@ -64,7 +65,6 @@ CONFIG_EXAMPLE_PATH = BASE_DIR / 'config.example.json'
 ENV_PATH = BASE_DIR / '.env'
 ENV_EXAMPLE_PATH = BASE_DIR / '.env.example'
 
-env_was_created = False
 if not ENV_PATH.exists():
     try:
         ENV_PATH.write_text(
@@ -72,7 +72,6 @@ if not ENV_PATH.exists():
             encoding='utf-8',
         )
         ENV_PATH.chmod(0o600)
-        env_was_created = True
     except OSError as error:
         raise RuntimeError(f'无法根据环境变量模板创建 .env：{error}') from error
 
@@ -86,16 +85,12 @@ if not CONFIG_PATH.exists():
         raise RuntimeError(f'无法根据配置模板创建 config.json：{error}') from error
 
 load_dotenv(ENV_PATH)
-login_token = os.getenv('ZCFLIGHT_LOGIN_TOKEN', '').strip()
-if not login_token or login_token == 'replace-me':
-    detail = (
-        '已根据 .env.example 自动创建 .env，请填写真实 token 后重新启动'
-        if env_was_created
-        else '请在 .env 中填写真实 token'
-    )
-    raise RuntimeError(
-        f'缺少有效的 ZCFLIGHT_LOGIN_TOKEN，{detail}'
-    )
+if __name__ == '__main__':
+    from login_window import ensure_login
+    ensure_login()
+login_token = load_session()
+if login_token is None:
+    raise RuntimeError('请先登录羽bot个人中心')
 
 with open(CONFIG_PATH, 'r', encoding='utf-8') as config_file:
     config = json.load(config_file)
@@ -331,7 +326,7 @@ def request_set_current_user(nickname):
     try:
         res = client.post(
             set_current_user_api_url,
-            headers={"Authorization": f"Bearer {login_token}"},
+            headers=auth_headers(login_token),
             json={
                 "nickname": nickname,
             },

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from flight_session import auth_headers
+
 
 @dataclass(frozen=True)
 class GachaHistoryRecord:
@@ -70,7 +72,7 @@ def get_gacha_history(
         params["nickname"] = nickname
     response = client.get(
         url,
-        headers={"Authorization": f"Bearer {login_token}"},
+        headers=auth_headers(login_token),
         params=params,
     )
     response.raise_for_status()

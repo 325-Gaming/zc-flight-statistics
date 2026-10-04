@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from flight_session import auth_headers
 
 @dataclass(frozen=True)
 class GachaUploadTask:
@@ -191,10 +192,7 @@ class GachaUploadQueue:
                     }
                 response = self.client.post(
                     url,
-                    headers={
-                        "Authorization": f"Bearer {self.login_token}",
-                        "Content-Type": "application/json",
-                    },
+                    headers={**auth_headers(self.login_token), "Content-Type": "application/json"},
                     json=payload,
                 )
                 response.raise_for_status()

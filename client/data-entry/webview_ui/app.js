@@ -25,21 +25,23 @@ function escapeHtml(value) {
   })[character]);
 }
 
-function showDialog(title, message, confirm = false) {
+function showDialog(title, message, confirm = false, checkboxLabel = '') {
   return new Promise(resolve => {
     const previousFocus = document.activeElement;
     dialogLayer.hidden = false;
     dialogLayer.innerHTML = `<div class="dialog-box" role="dialog" aria-modal="true">
       <h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p>
+      ${checkboxLabel ? `<label class="check-row"><input id="dialog-checkbox" type="checkbox">${escapeHtml(checkboxLabel)}</label>` : ''}
       <div class="actions">${confirm ? '<button id="dialog-cancel">取消</button>' : ''}
       <button id="dialog-ok" class="primary">确定</button></div></div>`;
     const finish = answer => {
+      const checked = checkboxLabel ? document.getElementById('dialog-checkbox').checked : false;
       dialogLayer.hidden = true;
       dialogLayer.innerHTML = '';
       const target = previousFocus?.isConnected && previousFocus !== document.body
         ? previousFocus : appElement;
       target.focus({preventScroll: true});
-      resolve(answer);
+      resolve(checkboxLabel ? {confirmed: answer, checked} : answer);
     };
     document.getElementById('dialog-ok').onclick = () => finish(true);
     if (confirm) document.getElementById('dialog-cancel').onclick = () => finish(false);
@@ -107,7 +109,7 @@ async function applyTheme(name) {
 function renderMain() {
   const s = state;
   const menus = [
-    ['文件', [['导入乘客名单…', 'import'], ['设置…', 'settings'], ['退出', 'exit']]],
+    ['文件', [['导入乘客名单…', 'import'], ['设置…', 'settings'], ['退出登录', 'logout'], ['退出', 'exit']]],
     ['操作', [['撤销上一条', 'undo'], ['抽卡记录…', 'history']]],
     ['统计', [['直播页面设置…', 'page'], ['查看统计', 'statistics']]],
   ];
@@ -149,6 +151,18 @@ function renderMain() {
     closeMenus();
     if (action === 'exit') {
       if (await showDialog('退出', '确定退出客户端吗？', true)) await api('close');
+    } else if (action === 'logout') {
+      const choice = await showDialog('退出登录', '确定退出羽bot个人中心吗？未勾选时将返回登录页面。', true, '同时退出客户端');
+      if (choice.confirmed) {
+        const result = await api('logout');
+        if (result && !result.failed) {
+          if (!result.revoked) {
+            await showDialog('退出登录未完全成功',
+              '本地会话已清除，但未能确认服务端会话已撤销。请检查网络连接，并联系管理员核查。');
+          }
+          await api('close', {relogin: !choice.checked});
+        }
+      }
     } else if (action === 'undo') {
       await undoLast();
     } else if (action === 'import') {

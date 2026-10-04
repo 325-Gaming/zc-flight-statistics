@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 
 import httpx
 
+from flight_session import auth_headers
 
 MANIFEST_SCHEMA_VERSION = 1
 DEFAULT_MODEL_FILES = {
@@ -241,7 +242,7 @@ def update_models(
     models_dir = pathlib.Path(models_dir)
     local_manifest_path = models_dir / "manifest.json"
     local_manifest = _load_local_manifest(local_manifest_path)
-    headers = {"Authorization": f"Bearer {login_token}"} if login_token else {}
+    headers = auth_headers(login_token) if login_token else {}
     owns_client = client is None
     http_client = client or httpx.Client(http2=True, timeout=httpx.Timeout(30, read=300))
 

@@ -2,6 +2,7 @@
 
 import httpx
 
+from flight_session import auth_headers
 from page_style_settings import normalize_page_style_name
 
 
@@ -22,7 +23,7 @@ POLL_INTERVAL_MIN_SECONDS = 1
 
 
 def _authorization_headers(login_token):
-    return {"Authorization": f"Bearer {login_token}"}
+    return auth_headers(login_token)
 
 
 def _normalize_settings(data):
