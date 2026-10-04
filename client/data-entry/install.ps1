@@ -174,8 +174,9 @@ print(sys.executable)
 
     Write-Host '[4/5] Installing dependencies (ONNX Runtime and WebView)...'
     Write-Host "Package index: $IndexUrl"
+    # pywebview depends on proxy-tools, which is distributed without a usable wheel.
     Invoke-Checked $uvExe @('pip', 'install', '--no-config', '--python', $pythonExe,
-        '--default-index', $IndexUrl, '--only-binary', ':all:',
+        '--default-index', $IndexUrl, '--only-binary', ':all:', '--no-binary', 'proxy-tools',
         '-r', (Join-Path $PSScriptRoot 'requirements.txt'))
     Invoke-Checked $uvExe @('pip', 'check', '--no-config', '--python', $pythonExe)
     # Do not import main.py: it contacts the model service during startup.
