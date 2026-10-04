@@ -2,6 +2,22 @@
 
 本文件记录 Zc Flight Statistics 的重要版本变更。
 
+## [2.0.0] - 2026-10-04
+
+### 新增
+
+- data-entry 改用 WebView 界面，并支持加载直播页主题 CSS；客户端随包提供经典主题。
+- 客户端通过羽bot个人中心登录，保存最长 7 天的本机会话，并支持退出登录。
+
+### 改进
+
+- 抽卡识别改用 ONNX Runtime，安装时不再依赖 TensorFlow。
+- 页面样式和卡池列表接口分别使用 `page_style_list`、`pool_name_list` 字段。
+
+### 不兼容变更
+
+- 客户端不再读取固定的 `ZCFLIGHT_LOGIN_TOKEN`；受保护接口改由服务端逐请求校验个人中心会话及 `zc.flight_user` 权限。旧客户端不能继续使用固定 token 访问这些接口。
+
 ## [1.0.0] - 2026-09-21
 
 ### 新增
