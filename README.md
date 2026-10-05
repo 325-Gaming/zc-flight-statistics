@@ -60,8 +60,8 @@ client/data-entry/
 
 适用于 Windows 10/11 **Intel/AMD 64 位**电脑，无需预装 Python、Git 或 Conda。
 
-1. 下载并解压本仓库，或取得完整的 `client/data-entry` 文件夹，将它放在固定、可写且路径较短的位置，例如 `C:\ZcFlight\data-entry`。不要直接在压缩包内运行，也不要放在 `Program Files` 下。
-2. 双击 `client/data-entry/install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。识别使用 CPU 版 ONNX Runtime，界面使用 WebView2，无需安装 TensorFlow。
+1. 从本仓库的 GitHub Release 下载 `data-entry-vX.Y.Z.zip` 并解压，或下载仓库源码并取出完整的 `client/data-entry` 文件夹。将客户端放在固定、可写且路径较短的位置，例如 `C:\ZcFlight\data-entry`。不要直接在压缩包内运行，也不要放在 `Program Files` 下。
+2. 在客户端目录双击 `install.bat`，等待安装完成。安装器通过 GitHub 下载固定版本、经过 SHA-256 校验的 uv，由 uv 下载 Python 3.11，并默认从清华 PyPI 镜像安装 `requirements.txt` 中的依赖。识别使用 CPU 版 ONNX Runtime，界面使用 WebView2，无需安装 TensorFlow。
 3. 双击 `start.bat`，或桌面上的 **Zc航空抽卡统计数据录入** 快捷方式。首次启动会打开羽bot个人中心登录页。使用有 `zc.flight_user` 权限的 QQ 或邮箱账号登录。
 4. 登录通过后客户端重新启动并下载识别模型；进入“文件 → 设置…”选择当前活动和显示器。
 
@@ -91,6 +91,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File client/data-entry/instal
 ```
 
 Windows 安装流程的集成检查可通过 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File client/data-entry/test_windows_install.ps1` 执行。检查会在包含空格和中文的临时目录中真实下载依赖，验证首次安装、重复安装保留数据及并发安装拦截，不会读取真实 token 或连接业务接口。临时目录会保留并在结束时输出位置，检查完成后可自行删除。
+
+##### 发布客户端版本
+
+发布前先更新 `client/data-entry/version.py` 和 `CHANGELOG.md`，提交并将目标提交推送到本仓库的 `master`。然后为该提交创建并推送 `data-entry/vX.Y.Z` 标签，其中 `X.Y.Z` 必须与 `version.py` 一致。GitHub Actions 只在此类标签推送时运行：它从标签对应的已提交文件生成 `data-entry-vX.Y.Z.zip` 和包内的 `release-manifest.json`，校验后创建 GitHub Release。普通 `vX.Y.Z` 标签不会触发此流程。
+
+发布包不包含本地配置、名单、模型、虚拟环境或测试文件。当前客户端还没有应用内代码更新功能；下载新版后仍需关闭客户端、替换程序文件并按需重新运行 `install.bat`。替换时保留 `.env`、`config.json`、`name.csv`、`models/`、`.runtime/`、`.venv/` 及其他个人文件。
 
 ##### 手动安装（开发及其他平台）
 
@@ -234,6 +240,7 @@ operators.txt
 - [x] 客户端增加切换前端页面主题样式功能
 - [ ] 支持自动热更新同名主题 CSS 文件
 - [ ] 完善客户端打包和发布流程
+- [ ] 在客户端内检查 Git 或 GitHub Release 更新，并在安装成功后重启
 
 ### 从 TensorFlow 客户端升级
 
