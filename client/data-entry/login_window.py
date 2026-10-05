@@ -2,6 +2,7 @@
 
 import json
 import os
+import pathlib
 import sys
 import threading
 import time
@@ -128,8 +129,13 @@ def ensure_login():
                 pass
             closed.wait(2)
 
-    webview.start(check_login, gui='edgechromium' if sys.platform == 'win32' else None,
-                  private_mode=True)
+    icon_name = 'favicon.png' if sys.platform == 'darwin' else 'favicon.ico'
+    webview.start(
+        check_login,
+        gui='edgechromium' if sys.platform == 'win32' else None,
+        private_mode=True,
+        icon=str(pathlib.Path(__file__).resolve().parent / icon_name),
+    )
     if not accepted:
         raise SystemExit(0)
     os.execv(sys.executable, [sys.executable, *sys.argv])

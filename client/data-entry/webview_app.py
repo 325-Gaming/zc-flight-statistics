@@ -719,11 +719,12 @@ def main():
     app.create_window("main")
     app.start_hotkeys()
     signal.signal(signal.SIGINT, lambda _signum, _frame: app.close())
+    icon_name = "favicon.png" if sys.platform == "darwin" else "favicon.ico"
     try:
         webview.start(
             gui=gui,
             private_mode=True,
-            icon=str(core.BASE_DIR / "favicon.ico"),
+            icon=str(core.BASE_DIR / icon_name),
         )
     finally:
         app.finish_close()

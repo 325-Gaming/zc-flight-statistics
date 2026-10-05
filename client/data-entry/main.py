@@ -429,10 +429,17 @@ class SimpleApp:
         if sys.platform == 'win32':
             self.root.iconbitmap(BASE_DIR / 'favicon.ico')
         else:
-            # macOS uses iconphoto to set the application's Dock icon.
-            with Image.open(BASE_DIR / 'favicon.ico') as icon_image:
-                self._app_icon = ImageTk.PhotoImage(icon_image, master=self.root)
+            self._app_icon = ImageTk.PhotoImage(
+                file=BASE_DIR / 'favicon.png', master=self.root,
+            )
             self.root.iconphoto(True, self._app_icon)
+            if sys.platform == 'darwin':
+                from AppKit import NSApplication, NSImage
+
+                dock_icon = NSImage.alloc().initByReferencingFile_(
+                    str(BASE_DIR / 'favicon.png')
+                )
+                NSApplication.sharedApplication().setApplicationIconImage_(dock_icon)
         self.event_name = event_name
         self.pool_name = pool_name
         self.user_name_list = list(user_name_list)
