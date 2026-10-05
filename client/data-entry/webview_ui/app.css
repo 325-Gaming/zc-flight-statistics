@@ -76,6 +76,11 @@ input[type="checkbox"] { min-height: auto; accent-color: var(--client-accent-bac
   border-radius: 6px;
 }
 .menu-bar { display: flex; flex: 0 0 auto; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--client-border); }
+.captain-profile { display: flex; align-items: center; align-self: center; gap: 8px; min-width: 0; margin-left: auto; text-align: right; }
+.captain-label { flex: none; font-size: 1.325rem; line-height: 1; }
+.captain-details { min-width: 0; }
+.captain-title, .captain-nickname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.captain-nickname { padding-right: 1rem; }
 .menu-wrap { position: relative; }
 .menu-trigger { min-width: 56px; }
 .menu-popover { position: absolute; top: calc(100% + 2px); left: 0; z-index: 10; min-width: 200px; padding: 4px; box-shadow: 0 6px 16px color-mix(in srgb, var(--client-text) 25%, transparent); }
@@ -105,6 +110,9 @@ fieldset legend { padding: 0 5px; }
 .gacha-button small { color: inherit; }
 .status { min-height: 22px; margin: 10px 0 0; color: var(--client-muted-text); }
 .content { padding: 18px; height: 100%; overflow: auto; }
+.import-view { display: flex; flex-direction: column; gap: 10px; }
+.import-view textarea { flex: 1; min-height: 0; width: 100%; resize: none; }
+.import-view .actions { margin-top: 0; }
 .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .toolbar select { min-width: 270px; }
 .history { display: flex; flex-direction: column; }
@@ -122,6 +130,10 @@ tbody tr.selected { background: var(--client-selection-background); color: var(-
 .form-grid input:not([type="checkbox"]), .form-grid select { width: 100%; }
 .form-grid .hint { grid-column: 2; margin: -7px 0 4px; color: var(--client-muted-text); }
 .form-grid .wide { grid-column: 1 / -1; }
+.form-separator { border-top: 1px solid var(--client-border); margin: 4px 0; }
+.form-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.form-view-content { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px; }
+.actions.form-view-actions { position: relative; z-index: 20; flex: 0 0 auto; margin: 0; padding: 12px 18px; border-top: 1px solid var(--client-border); background: var(--client-panel-background); }
 .inline { display: flex; gap: 6px; align-items: center; }
 .inline > :first-child { flex: 1; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

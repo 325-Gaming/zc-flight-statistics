@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
 import main as core
 from event_settings import compose_event_name
-from flight_session import logout
+from flight_session import get_login_info, has_flight_permission, logout
 from gacha_history import format_gacha_position, get_gacha_history
 from gacha_upload import GachaMoveTask, GachaStateTask, GachaUploadQueue
 from hotkeys import register_hotkeys
@@ -48,9 +48,10 @@ from page_style_settings import (
 
 UI_PATH = str(core.BASE_DIR / "webview_ui/index.html")
 WINDOWS = {
-    "main": (f"{core._name} {core._version}", 920, 600, (860, 600)),
+    "main": (f"{core._name} {core._version}", 1024, 800, (860, 680)),
+    "import": ("导入乘客名单", 560, 440, (420, 320)),
     "history": ("抽卡记录", 1000, 520, (760, 400)),
-    "settings": ("设置", 780, 760, (700, 700)),
+    "settings": ("设置", 900, 960, (700, 700)),
     "page": ("直播页面设置", 620, 760, (560, 650)),
     "statistics": ("查看统计", 760, 190, (640, 170)),
     "preview": ("显示器预览", 980, 670, (600, 400)),
@@ -58,6 +59,31 @@ WINDOWS = {
 HOTKEY_KEYS = (
     "hotkey_gacha10", "hotkey_3x", "hotkey_4x", "hotkey_5x", "hotkey_6x",
 )
+
+
+def _captain_profile(login_info):
+    if not has_flight_permission(login_info):
+        return None
+    title_adj = login_info.get("title_adj")
+    title_title = login_info.get("title_title")
+    title = (title_adj if isinstance(title_adj, str) else "") + (
+        title_title if isinstance(title_title, str) else ""
+    )
+    nickname = ""
+    selected = login_info.get("nickname")
+    if login_info.get("user_id") and isinstance(selected, str) and selected != "null":
+        bilibili = login_info.get("bilibili") or {}
+        arknights = login_info.get("arknights") or {}
+        bilibili_name = bilibili.get("nickname", "") if isinstance(bilibili, dict) else ""
+        arknights_name = arknights.get("nickname", "") if isinstance(arknights, dict) else ""
+        bilibili_name = bilibili_name if isinstance(bilibili_name, str) else ""
+        arknights_name = arknights_name if isinstance(arknights_name, str) else ""
+        nickname = {
+            "bilibili_nickname": bilibili_name,
+            "arknights_nickname": arknights_name,
+            "arknights_nickname_clear": arknights_name.split("#")[0],
+        }.get(selected, "")
+    return {"title": title, "nickname": nickname}
 
 
 class Bridge:
@@ -129,6 +155,7 @@ class WebViewApp:
         self.gacha_index = 1
         self.result = ""
         self.status = ""
+        self.captain_profile = None
         self.history_filter = "current"
         self.history_nickname = None
         self.history_records = {}
@@ -163,6 +190,7 @@ class WebViewApp:
                 "event": self.full_event_name,
                 "result": self.result,
                 "status": self.status,
+                "captain": self.captain_profile,
                 "hotkeys": {key: getattr(core, key) for key in HOTKEY_KEYS},
             }
 
@@ -379,10 +407,20 @@ class WebViewApp:
         except (httpx.HTTPError, ValueError):
             self.page_style = DEFAULT_PAGE_STYLE
 
+    def _load_captain_profile(self):
+        try:
+            login_info = get_login_info(core.login_token, client=core.client)
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            login_info = None
+        self.captain_profile = _captain_profile(login_info)
+
     def bootstrap(self, view):
         if view == "main":
             self._load_style()
+            self._load_captain_profile()
             data = self._main_state()
+        elif view == "import":
+            data = {}
         elif view == "settings":
             data = self._settings_state()
         elif view == "page":
@@ -599,18 +637,6 @@ class WebViewApp:
                     if nickname != self.last_synced_user and core.request_set_current_user(nickname):
                         self.last_synced_user = nickname
                     self._emit_main()
-            elif name == "import":
-                paths = self.windows["main"].create_file_dialog(
-                    webview.FileDialog.OPEN,
-                    file_types=("名单文件 (*.csv;*.txt)", "所有文件 (*.*)"),
-                )
-                if paths:
-                    with pathlib.Path(paths[0]).open(encoding="utf-8-sig") as name_file:
-                        names = [line.strip() for line in name_file if line.strip()]
-                    if not names:
-                        raise ValueError("选择的文件中没有乘客姓名")
-                    self.user_name_list = names
-                    self._current_user(0)
             elif name == "single":
                 rarity = int(payload["rarity"])
                 if rarity not in (3, 4, 5, 6):
@@ -644,6 +670,26 @@ class WebViewApp:
             else:
                 raise ValueError("不支持的操作")
             return self._main_state()
+        if view == "import":
+            if name == "open_file":
+                paths = self.windows["import"].create_file_dialog(
+                    webview.FileDialog.OPEN,
+                    file_types=("名单文件 (*.csv;*.txt)", "所有文件 (*.*)"),
+                )
+                if not paths:
+                    return None
+                return pathlib.Path(paths[0]).read_text(encoding="utf-8-sig")
+            if name == "confirm":
+                text = payload.get("text")
+                if not isinstance(text, str):
+                    raise ValueError("乘客名单内容无效")
+                names = [line.strip() for line in text.splitlines() if line.strip()]
+                if not names:
+                    raise ValueError("乘客名单中没有乘客姓名")
+                self.user_name_list = names
+                self._current_user(0)
+                return True
+            raise ValueError("不支持的操作")
         if view == "history":
             if name == "filter":
                 mode = payload.get("mode")

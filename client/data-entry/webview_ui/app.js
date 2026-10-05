@@ -108,14 +108,19 @@ async function applyTheme(name) {
 
 function renderMain() {
   const s = state;
+  const captain = s.captain;
+  const captainTitle = captain ? `【${captain.title}】` : '资料暂不可用';
+  const captainNickname = captain?.nickname || '';
+  const captainText = `机长 ${captainTitle}${captainNickname ? ` ${captainNickname}` : ''}`;
   const menus = [
-    ['文件', [['导入乘客名单…', 'import'], ['设置…', 'settings'], ['退出登录', 'logout'], ['退出', 'exit']]],
+    ['文件', [['设置', 'settings'], ['导入乘客名单…', 'import'], [null], ['退出登录', 'logout'], ['退出', 'exit']]],
     ['操作', [['撤销上一条', 'undo'], ['抽卡记录…', 'history']]],
     ['统计', [['直播页面设置…', 'page'], ['查看统计', 'statistics']]],
   ];
   const menuHtml = menus.map(([label, items], index) => `<div class="menu-wrap">
     <button class="menu-trigger" data-menu="${index}" aria-expanded="false">${label}</button>
     <div class="menu-popover" id="menu-${index}" hidden>${items.map(([item, action]) =>
+      item === null ? '<div class="menu-separator" role="separator"></div>' :
       `<button data-menu-action="${action}">${item}</button>`).join('')}</div></div>`).join('');
   const passengers = s.passengers.map((name, index) =>
     `<button data-passenger="${index}" class="${index === s.user_id ? 'selected' : ''}">${escapeHtml(name)}</button>`
@@ -124,7 +129,12 @@ function renderMain() {
     `<button class="gacha-button" data-rarity="${rarity}"><strong>${'零一二三四五六'[rarity]}星</strong>
     <small>${escapeHtml(s.hotkeys[`hotkey_${rarity}x`] ? `快捷键 ${s.hotkeys[`hotkey_${rarity}x`]}` : '')}</small></button>`
   ).join('');
-  appElement.innerHTML = `<div class="menu-bar">${menuHtml}</div>
+  appElement.innerHTML = `<div class="menu-bar">${menuHtml}
+    <div class="captain-profile" title="${escapeHtml(captainText)}">
+      <span class="captain-label">机长</span>
+      <span class="captain-details"><span class="captain-title">${escapeHtml(captainTitle)}</span>
+        ${captainNickname ? `<span class="captain-nickname">${escapeHtml(captainNickname)}</span>` : ''}</span>
+    </div></div>
     <div class="main-layout"><aside class="sidebar panel"><h2>乘客列表</h2>
       <div class="passenger-list">${passengers}</div></aside>
     <main class="main-panel"><div class="result">${escapeHtml(s.result)}</div>
@@ -165,9 +175,6 @@ function renderMain() {
       }
     } else if (action === 'undo') {
       await undoLast();
-    } else if (action === 'import') {
-      const result = await api('import');
-      if (!result?.failed) { state = result; renderMain(); }
     } else await api('open', {view: action});
   });
   appElement.querySelectorAll('[data-passenger]').forEach(button => button.onclick = () => mainAction('select', {index: Number(button.dataset.passenger)}));
@@ -199,6 +206,25 @@ async function undoLast() {
 async function mainAction(name, payload = {}) {
   const data = await api(name, payload);
   if (!data?.failed && data) { state = data; renderMain(); }
+}
+
+function renderImport() {
+  appElement.innerHTML = `<div class="content import-view">
+    <label for="import-text">乘客名单（每行一位乘客）</label>
+    <textarea id="import-text" spellcheck="false"></textarea>
+    <div class="actions"><button id="import-open-file">打开文件</button>
+      <button id="import-cancel">取消</button><button id="import-confirm" class="primary">确定</button></div></div>`;
+  const input = document.getElementById('import-text');
+  document.getElementById('import-open-file').onclick = async () => {
+    const contents = await api('open_file');
+    if (typeof contents === 'string') input.value = contents;
+  };
+  document.getElementById('import-cancel').onclick = () => api('close');
+  document.getElementById('import-confirm').onclick = async () => {
+    const result = await api('confirm', {text: input.value});
+    if (!result?.failed) await api('close');
+  };
+  input.focus();
 }
 
 function renderHistory() {
@@ -279,16 +305,17 @@ function renderSettings() {
   const fields = [
     settingsField('event_name', '活动名称', '基础活动名称，会与卡池名称拼接后提交抽卡记录。', textInput('event_name', config.event_name)),
     settingsField('pool_name', '卡池名称', '', `<select id="setting-pool_name">${poolOptions}</select>`),
-    settingsField('target_monitor_id', '截图显示器编号', '执行识别时需要截取的显示器编号。', `<div class="inline"><select id="setting-target_monitor_id">${monitorOptions}</select><button id="monitors-refresh">刷新列表</button><button id="monitors-preview">显示预览</button></div>`),
     settingsField('user_name_list_file', '乘客名单文件', '相对于程序目录；更换后会替换当前乘客列表。', textInput('user_name_list_file', config.user_name_list_file)),
+    '<p class="wide muted" id="event-preview"></p>',
+    '<div class="wide form-separator" role="separator"></div>',
+    settingsField('target_monitor_id', '截图显示器编号', '执行识别时需要截取的显示器编号。', `<div class="inline"><select id="setting-target_monitor_id">${monitorOptions}</select><button id="monitors-refresh">刷新列表</button><button id="monitors-preview">显示预览</button></div>`),
     ...['hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x'].map((key, index) =>
       settingsField(key, ['十连快捷键', '三星快捷键', '四星快捷键', '五星快捷键', '六星快捷键'][index],
         '可留空；设置窗口打开期间，全局快捷键无效。',
         `<div class="inline">${textInput(key, config[key] || '')}<button data-clear="${key}">移除</button></div>`)),
   ];
-  appElement.innerHTML = `<div class="content"><div class="form-grid">${fields.join('')}
-    <p class="wide muted" id="event-preview"></p></div>
-    <div class="actions"><button id="settings-cancel">取消</button><button id="settings-save" class="primary">保存</button></div></div>`;
+  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><div class="form-grid">${fields.join('')}</div></div>
+    <div class="actions form-view-actions"><button id="settings-cancel">取消</button><button id="settings-save" class="primary">保存</button></div></div>`;
   document.getElementById('setting-pool_name').value = data.selected_pool;
   document.getElementById('setting-target_monitor_id').value = String(config.target_monitor_id);
   const updatePreview = () => {
@@ -339,7 +366,7 @@ function renderPage() {
     <input type="checkbox" id="page-${key}" ${s[key] ? 'checked' : ''}>${escapeHtml(label)}</label>`;
   const fields = data.text_items.map(([key, label]) =>
     `<label for="page-${key}">${escapeHtml(label)}</label><input id="page-${key}" value="${escapeHtml(s[key])}">`).join('');
-  appElement.innerHTML = `<div class="content"><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
+  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
     ${escapeHtml(data.activity[1])}</label><div class="form-grid">
     <label for="page-poll_interval_seconds">数据轮询间隔（秒）</label>
     <input type="number" id="page-poll_interval_seconds" min="1" max="60" value="${s.poll_interval_seconds}">
@@ -347,8 +374,8 @@ function renderPage() {
     <label for="page-page_style">页面样式</label><select id="page-page_style">${data.styles.map(name =>
       `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}</select>
     <p class="wide muted">页面项目，勾选表示显示，不勾选表示隐藏。</p>
-    <div class="wide">${data.display_items.map(check).join('')}</div>${fields}</div>
-    <div class="actions"><button id="page-cancel">取消</button><button id="page-save" class="primary">保存</button></div></div>`;
+    <div class="wide">${data.display_items.map(check).join('')}</div>${fields}</div></div>
+    <div class="actions form-view-actions"><button id="page-cancel">取消</button><button id="page-save" class="primary">保存</button></div></div>`;
   document.getElementById('page-page_style').value = data.styles.includes(s.page_style) ? s.page_style : 'classic';
   const active = document.getElementById('page-is_active');
   const interval = document.getElementById('page-poll_interval_seconds');
@@ -390,6 +417,7 @@ function renderStatistics() {
 function render() {
   appElement.classList.toggle('main-view', view === 'main');
   if (view === 'main') renderMain();
+  else if (view === 'import') renderImport();
   else if (view === 'history') renderHistory();
   else if (view === 'settings') renderSettings();
   else if (view === 'page') renderPage();
