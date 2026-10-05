@@ -113,7 +113,7 @@ function renderMain() {
   const captainNickname = captain?.nickname || '';
   const captainText = `机长 ${captainTitle}${captainNickname ? ` ${captainNickname}` : ''}`;
   const menus = [
-    ['文件', [['设置', 'settings'], ['导入乘客名单…', 'import'], [null], ['退出登录', 'logout'], ['退出', 'exit']]],
+    ['文件', [['设置', 'settings'], ['检查更新…', 'update'], ['导入乘客名单…', 'import'], [null], ['退出登录', 'logout'], ['退出', 'exit']]],
     ['操作', [['撤销上一条', 'undo'], ['抽卡记录…', 'history']]],
     ['统计', [['直播页面设置…', 'page'], ['查看统计', 'statistics']]],
   ];
@@ -414,12 +414,46 @@ function renderStatistics() {
   };
 }
 
+function renderUpdate() {
+  const current = escapeHtml(state.current_version);
+  const message = state.checking ? '正在检查更新…' : state.available
+    ? `发现新版本 ${escapeHtml(state.version)}。更新完成后客户端将自动重启。`
+    : state.checked ? '当前已是最新版本。' : '准备检查更新。';
+  const source = state.mode === 'git' ? 'Git 仓库' : 'GitHub Release';
+  appElement.innerHTML = `<div class="content"><h2>检查更新</h2>
+    <p>当前版本：${current}</p><p role="status">${message}</p>
+    ${state.checked ? `<p class="muted">更新来源：${source}</p>` : ''}
+    <div class="actions"><button id="update-check" ${state.checking || state.installing ? 'disabled' : ''}>重新检查</button>
+    ${state.available ? `<button id="update-install" class="primary" ${state.installing ? 'disabled' : ''}>更新并重启</button>` : ''}</div></div>`;
+  document.getElementById('update-check').onclick = checkForUpdate;
+  const install = document.getElementById('update-install');
+  if (install) install.onclick = async () => {
+    if (!await showDialog('更新并重启', `确定更新到 ${state.version} 并重启客户端吗？`, true)) return;
+    state.installing = true;
+    renderUpdate();
+    const result = await api('install');
+    if (result?.failed) { state.installing = false; renderUpdate(); }
+    else appElement.querySelector('[role="status"]').textContent = '正在关闭客户端并安装更新…';
+  };
+}
+
+async function checkForUpdate() {
+  state.checking = true;
+  renderUpdate();
+  const result = await api('check');
+  state = result?.failed
+    ? {...state, available: false, checked: false, checking: false}
+    : {...result, checked: true, checking: false};
+  renderUpdate();
+}
+
 function render() {
   appElement.classList.toggle('main-view', view === 'main');
   if (view === 'main') renderMain();
   else if (view === 'import') renderImport();
   else if (view === 'history') renderHistory();
   else if (view === 'settings') renderSettings();
+  else if (view === 'update') renderUpdate();
   else if (view === 'page') renderPage();
   else if (view === 'statistics') renderStatistics();
   else if (view === 'preview') appElement.innerHTML = `<div class="content"><img class="preview-image" alt="显示器预览" src="${escapeHtml(state.image)}"></div>`;
@@ -451,6 +485,7 @@ window.addEventListener('pywebviewready', async () => {
     state = bootstrap.data;
     applyTheme(bootstrap.theme);
     render();
+    if (view === 'update') await checkForUpdate();
   } catch (error) {
     appElement.innerHTML = `<div class="content error">无法加载窗口：${escapeHtml(error.message || error)}</div>`;
   }

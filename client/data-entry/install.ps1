@@ -1,5 +1,5 @@
 ﻿# Requires Windows PowerShell 5.1. Save as UTF-8 with BOM to preserve Unicode filenames.
-# Run through install.bat; -NoShortcut is intended for unattended verification.
+# Run through install.bat; -NoShortcut is used by the updater and unattended verification.
 [CmdletBinding()]
 param(
     [switch]$NoShortcut,
@@ -46,7 +46,7 @@ try {
     if ([Environment]::OSVersion.Version.Major -lt 10) {
         throw 'Windows 10 or later is required.'
     }
-    foreach ($required in @('main.py', 'webview_app.py', 'flight_session.py', 'login_window.py',
+    foreach ($required in @('main.py', 'webview_app.py', 'app_updater.py', 'flight_session.py', 'login_window.py',
         'requirements.txt', '.env.example',
         'config.example.json', 'name.example.csv', 'start.bat', 'favicon.ico')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required) -PathType Leaf)) {

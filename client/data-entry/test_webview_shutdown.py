@@ -14,6 +14,7 @@ class WebViewShutdownTests(unittest.TestCase):
         fake_core = types.ModuleType("main")
         fake_core._name = "Zc 测试"
         fake_core._version = "V0"
+        fake_core._version_number = "0.0.0"
         fake_core.BASE_DIR = pathlib.Path(__file__).parent
         fake_webview = types.ModuleType("webview")
         module_path = pathlib.Path(__file__).with_name("webview_app.py")
@@ -138,6 +139,40 @@ class WebViewShutdownTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "上传任务未完成"):
                 app.action("main", "logout", {})
         revoke.assert_not_called()
+
+    def test_update_checks_then_closes_main_only_after_helper_starts(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.logged_out = False
+        app.update_offer = None
+        app.upload_queue = Mock(pending_count=0)
+        app.predict_lock = module.threading.Lock()
+        app.windows = {"main": Mock()}
+        offer = {"available": True, "mode": "release", "version": "2.2.0",
+                 "current_version": "2.1.0", "url": "private backend value"}
+        with patch.object(module, "check_update", return_value=offer), \
+             patch.object(module, "start_update") as start, \
+             patch.object(module.threading, "Timer") as timer:
+            self.assertEqual(app.action("update", "check", {}),
+                             {"available": True, "mode": "release", "version": "2.2.0",
+                              "current_version": "2.1.0"})
+            self.assertEqual(app.action("update", "install", {}), {"restarting": True})
+        start.assert_called_once()
+        timer.assert_called_once_with(0.3, app.windows["main"].destroy)
+        timer.return_value.start.assert_called_once_with()
+        self.assertIsNone(app.update_offer)
+
+    def test_update_refuses_pending_upload_without_closing(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.logged_out = False
+        app.update_offer = {"available": True}
+        app.upload_queue = Mock(pending_count=1)
+        app.predict_lock = module.threading.Lock()
+        with patch.object(module, "start_update") as start:
+            with self.assertRaisesRegex(RuntimeError, "上传或识别任务"):
+                app.action("update", "install", {})
+        start.assert_not_called()
 
 
 if __name__ == "__main__":

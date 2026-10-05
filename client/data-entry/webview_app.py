@@ -19,6 +19,7 @@ if __name__ == "__main__":
     ensure_login()
 
 import main as core
+from app_updater import check_update, start_update
 from event_settings import compose_event_name
 from flight_session import get_login_info, has_flight_permission, logout
 from gacha_history import format_gacha_position, get_gacha_history
@@ -52,6 +53,7 @@ WINDOWS = {
     "import": ("导入乘客名单", 560, 440, (420, 320)),
     "history": ("抽卡记录", 1000, 520, (760, 400)),
     "settings": ("设置", 900, 960, (700, 700)),
+    "update": ("检查更新", 560, 330, (460, 280)),
     "page": ("直播页面设置", 620, 760, (560, 650)),
     "statistics": ("查看统计", 760, 190, (640, 170)),
     "preview": ("显示器预览", 980, 670, (600, 400)),
@@ -147,6 +149,7 @@ class WebViewApp:
         self.logged_out = False
         self.relogin_requested = False
         self.settings_open = False
+        self.update_offer = None
         self.hotkey_listener = None
         self.user_name_list = list(core.user_name_list)
         self.user_id = -1
@@ -423,6 +426,8 @@ class WebViewApp:
             data = {}
         elif view == "settings":
             data = self._settings_state()
+        elif view == "update":
+            data = {"current_version": core._version_number}
         elif view == "page":
             data = self._page_state()
         elif view == "history":
@@ -605,6 +610,24 @@ class WebViewApp:
             timer.daemon = True
             timer.start()
             return None
+        if view == "update":
+            if name == "check":
+                self.update_offer = None
+                self.update_offer = check_update(core.BASE_DIR, core._version_number)
+                return {key: value for key, value in self.update_offer.items()
+                        if key in {"available", "mode", "current_version", "version", "commit"}}
+            if name == "install":
+                if not self.update_offer or not self.update_offer["available"]:
+                    raise ValueError("请先检查更新")
+                if self.upload_queue.pending_count or self.predict_lock.locked():
+                    raise RuntimeError("仍有上传或识别任务，请等待完成后再更新")
+                start_update(core.BASE_DIR, self.update_offer, os.getpid(), list(sys.argv))
+                self.update_offer = None
+                timer = threading.Timer(0.3, self.windows["main"].destroy)
+                timer.daemon = True
+                timer.start()
+                return {"restarting": True}
+            raise ValueError("不支持的操作")
         if view == "main":
             if name == "select":
                 index = int(payload["index"])
