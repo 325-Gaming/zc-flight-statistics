@@ -1,9 +1,9 @@
 name: Data-entry release
 
 on:
-  push:
-    tags:
-      - 'data-entry/v*'
+  schedule:
+    - cron: '25 3 * * *'
+      timezone: 'Asia/Shanghai'
   workflow_dispatch:
     inputs:
       tag:
@@ -14,17 +14,35 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: data-entry-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Select release tag
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          else
+            python3 .github/scripts/select_data_entry_release.py >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate and package data-entry
+        if: steps.select.outputs.tag != ''
+        env:
+          RELEASE_TAG: ${{ steps.select.outputs.tag }}
         run: |
           if [[ ! "$RELEASE_TAG" =~ ^data-entry/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "Invalid release tag: $RELEASE_TAG" >&2
@@ -42,8 +60,10 @@ jobs:
             --output "dist/data-entry-${RELEASE_TAG#data-entry/}.zip"
 
       - name: Publish GitHub Release
+        if: steps.select.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.select.outputs.tag }}
         run: |
           gh release create "$RELEASE_TAG" \
             "dist/data-entry-${RELEASE_TAG#data-entry/}.zip" \
