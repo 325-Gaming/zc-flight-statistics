@@ -1,0 +1,7 @@
+{
+  "data-entry": {
+    "schema_version": 1,
+    "minimum_supported_version": "2.2.0",
+    "message": "低于此版本的客户端需要更新后才能继续使用。"
+  }
+}

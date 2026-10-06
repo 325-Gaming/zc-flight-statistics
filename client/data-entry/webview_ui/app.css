@@ -110,6 +110,19 @@ fieldset legend { padding: 0 5px; }
 .gacha-button small { color: inherit; }
 .status { min-height: 22px; margin: 10px 0 0; color: var(--client-muted-text); }
 .content { padding: 18px; height: 100%; overflow: auto; }
+.gate-view { display: flex; flex-direction: column; justify-content: center; }
+.gate-view > p { line-height: 1.5; white-space: pre-wrap; }
+.gate-view .actions { margin-top: auto; }
+.gate-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 8px auto;
+  border: 3px solid var(--client-border);
+  border-top-color: var(--client-accent-background);
+  border-radius: 50%;
+  animation: gate-spin 0.8s linear infinite;
+}
+@keyframes gate-spin { to { transform: rotate(360deg); } }
 .import-view { display: flex; flex-direction: column; gap: 10px; }
 .import-view textarea { flex: 1; min-height: 0; width: 100%; resize: none; }
 .import-view .actions { margin-top: 0; }

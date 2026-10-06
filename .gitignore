@@ -34,9 +34,10 @@ dist/
 .env.*
 !.env.example
 
-# Local application settings
+# Local application data
 client/data-entry/config.json
 client/data-entry/name.csv
+client/data-entry/output.txt
 
 # Trained model artifacts
 client/data-entry/models/*

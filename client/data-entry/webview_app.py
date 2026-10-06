@@ -19,7 +19,15 @@ if __name__ == "__main__":
     ensure_login()
 
 import main as core
-from app_updater import check_update, start_update
+from app_updater import (
+    check_startup_update,
+    check_update,
+    fetch_update_policy,
+    read_update_failure,
+    recover_incomplete_update,
+    start_update,
+    version_is_at_least,
+)
 from event_settings import compose_event_name
 from flight_session import get_login_info, has_flight_permission, logout
 from gacha_history import format_gacha_position, get_gacha_history
@@ -54,6 +62,7 @@ WINDOWS = {
     "history": ("抽卡记录", 1000, 520, (760, 400)),
     "settings": ("设置", 900, 960, (700, 700)),
     "update": ("检查更新", 560, 330, (460, 280)),
+    "gate": ("启动检查", 560, 340, (460, 300)),
     "page": ("直播页面设置", 620, 760, (560, 650)),
     "statistics": ("查看统计", 760, 190, (640, 170)),
     "preview": ("显示器预览", 980, 670, (600, 400)),
@@ -150,10 +159,17 @@ class WebViewApp:
         self.relogin_requested = False
         self.settings_open = False
         self.update_offer = None
+        self.update_policy = None
+        self.startup_complete = False
+        self.gate_lock = threading.RLock()
+        self.gate_state = {"phase": "checking", "message": "正在连接官方更新服务…"}
+        self.startup_active = False
         self.hotkey_listener = None
         self.user_name_list = list(core.user_name_list)
-        self.user_id = -1
-        self.nickname = ""
+        if not self.user_name_list:
+            self.user_name_list.append("乘客1")
+        self.user_id = 0
+        self.nickname = self.user_name_list[0]
         self.last_synced_user = None
         self.gacha_index = 1
         self.result = ""
@@ -177,7 +193,6 @@ class WebViewApp:
             daemon=True,
         )
         core.app = self
-        self._next_user()
 
     @property
     def full_event_name(self):
@@ -321,7 +336,7 @@ class WebViewApp:
         return _ScheduledHotkeyListener(listener, scheduler) if scheduler is not None else listener
 
     def start_hotkeys(self):
-        if self.settings_open or self.closed:
+        if self.settings_open or self.closed or not self.update_policy:
             return
         try:
             self.hotkey_listener = self._register_hotkeys(
@@ -367,13 +382,101 @@ class WebViewApp:
         self.windows[view] = window
         window.events.closed += lambda: self._window_closed(view, window)
 
+    def start_startup_check(self):
+        self._begin_startup_check()
+
+    def _begin_startup_check(self):
+        with self.gate_lock:
+            if self.closed or self.startup_active:
+                return False
+            self.startup_active = True
+            self.gate_state = {"phase": "checking", "message": "正在连接官方更新服务…"}
+        threading.Thread(
+            target=self._run_startup_check, name="data-entry-startup-check", daemon=True,
+        ).start()
+        return True
+
+    def _run_startup_check(self):
+        try:
+            recover_incomplete_update(core.BASE_DIR)
+            policy = fetch_update_policy()
+            failure = read_update_failure(core.BASE_DIR)
+            result = check_startup_update(
+                core._version_number, policy["minimum_supported_version"],
+                force_repair=failure is not None,
+            )
+            offer = result["offer"]
+            if result["required"]:
+                state = {
+                    "phase": "required",
+                    "message": failure or policy["message"],
+                    "minimum_version": policy["minimum_supported_version"],
+                    "version": offer["version"],
+                }
+            elif offer.get("available"):
+                state = {
+                    "phase": "optional",
+                    "message": "发现可选稳定版更新；也可以稍后通过“文件 → 检查更新…”安装。",
+                    "version": offer["version"],
+                }
+            else:
+                state = {"phase": "ready", "message": "检查完成，正在打开客户端…"}
+            with self.gate_lock:
+                if not self.closed:
+                    self.update_policy = policy
+                    self.update_offer = offer if offer.get("available") else None
+                    self.gate_state = state
+        except (OSError, RuntimeError, ValueError, httpx.HTTPError) as error:
+            message = str(error)
+            with self.gate_lock:
+                if not self.closed:
+                    self.gate_state = {
+                        "phase": "error",
+                        "message": message or "无法验证官方更新策略，请检查网络后重试。",
+                    }
+            print(f"启动联网检查失败：{message}", file=sys.stderr)
+        finally:
+            with self.gate_lock:
+                self.startup_active = False
+
+    def _prepare_gate_update(self):
+        offer = self.update_offer
+        try:
+            if self.closed:
+                return
+            start_update(
+                core.BASE_DIR, offer, os.getpid(), list(sys.argv),
+                cancelled=lambda: self.closed,
+            )
+            with self.gate_lock:
+                if not self.closed:
+                    self.gate_state = {
+                        "phase": "restarting",
+                        "message": "更新包已校验，正在关闭客户端并安装…",
+                    }
+        except (OSError, RuntimeError, ValueError, httpx.HTTPError) as error:
+            message = str(error) or "更新准备失败，请重试。"
+            with self.gate_lock:
+                if not self.closed:
+                    self.gate_state = {
+                        "phase": "required" if self.gate_state.get("phase") == "installing-required"
+                        else "optional",
+                        "message": f"更新失败：{message}",
+                        "minimum_version": (
+                            self.update_policy["minimum_supported_version"]
+                            if self.update_policy else None
+                        ),
+                        "version": offer.get("version") if offer else None,
+                    }
+            print(f"更新准备失败：{message}", file=sys.stderr)
+
     def _window_closed(self, view, window):
         if self.windows.get(view) is window:
             del self.windows[view]
         if view == "settings":
             self.settings_open = False
             self.start_hotkeys()
-        if view == "main":
+        if view == "main" or (view == "gate" and not self.startup_complete):
             self.close()
 
     def close(self):
@@ -418,7 +521,11 @@ class WebViewApp:
         self.captain_profile = _captain_profile(login_info)
 
     def bootstrap(self, view):
-        if view == "main":
+        if view == "gate":
+            with self.gate_lock:
+                data = dict(self.gate_state)
+            data["current_version"] = core._version_number
+        elif view == "main":
             self._load_style()
             self._load_captain_profile()
             data = self._main_state()
@@ -575,6 +682,64 @@ class WebViewApp:
         return True
 
     def action(self, view, name, payload):
+        if view == "gate":
+            if name == "status":
+                with self.gate_lock:
+                    return dict(self.gate_state)
+            if name == "retry":
+                self._begin_startup_check()
+                return {"started": True}
+            if name == "exit":
+                window = self.windows.get("gate")
+                if window is not None:
+                    timer = threading.Timer(0.2, window.destroy)
+                    timer.daemon = True
+                    timer.start()
+                return {"closing": True}
+            if name in {"continue", "enter"}:
+                with self.gate_lock:
+                    phase = self.gate_state.get("phase")
+                    if phase not in {"ready", "optional"}:
+                        raise ValueError("启动检查尚未允许进入客户端")
+                    self.gate_state = {"phase": "entering", "message": "正在打开客户端…"}
+                self._current_user(self.user_id)
+                with self.gate_lock:
+                    self.startup_complete = True
+                self.create_window("main")
+                self.start_hotkeys()
+                window = self.windows.get("gate")
+                if window is not None:
+                    timer = threading.Timer(0.3, window.destroy)
+                    timer.daemon = True
+                    timer.start()
+                return {"entered": True}
+            if name == "install":
+                with self.gate_lock:
+                    phase = self.gate_state.get("phase")
+                    if phase not in {"required", "optional"} or not self.update_offer:
+                        raise ValueError("当前没有可验证的更新目标")
+                    self.gate_state["phase"] = (
+                        "installing-required" if phase == "required" else "installing-optional"
+                    )
+                    self.gate_state["message"] = "正在下载并校验更新包…"
+                threading.Thread(
+                    target=self._prepare_gate_update, name="data-entry-update-prepare",
+                    daemon=True,
+                ).start()
+                return {"started": True}
+            if name == "handoff":
+                with self.gate_lock:
+                    if self.gate_state.get("phase") != "restarting":
+                        raise ValueError("更新尚未准备完成")
+                window = self.windows.get("gate")
+                if window is not None:
+                    timer = threading.Timer(0.2, window.destroy)
+                    timer.daemon = True
+                    timer.start()
+                return {"closing": True}
+            raise ValueError("不支持的门禁操作")
+        if not getattr(self, "startup_complete", True):
+            raise RuntimeError("启动联网检查尚未通过，业务操作已锁定")
         if name == "logout" and view == "main":
             if self.logged_out:
                 raise RuntimeError("已退出登录，请关闭客户端")
@@ -614,11 +779,25 @@ class WebViewApp:
             if name == "check":
                 self.update_offer = None
                 self.update_offer = check_update(core.BASE_DIR, core._version_number)
+                if self.update_offer.get("available") and getattr(self, "update_policy", None):
+                    self.update_offer["minimum_version"] = (
+                        self.update_policy["minimum_supported_version"]
+                    )
                 return {key: value for key, value in self.update_offer.items()
                         if key in {"available", "mode", "current_version", "version", "commit"}}
             if name == "install":
                 if not self.update_offer or not self.update_offer["available"]:
                     raise ValueError("请先检查更新")
+                if not getattr(self, "update_policy", None):
+                    raise RuntimeError("尚未验证官方最低版本策略，不能安装更新")
+                if self.update_offer.get("version") and not version_is_at_least(
+                    self.update_offer["version"],
+                    self.update_policy["minimum_supported_version"],
+                ):
+                    raise ValueError("更新目标低于官方最低支持版本")
+                self.update_offer["minimum_version"] = (
+                    self.update_policy["minimum_supported_version"]
+                )
                 if self.upload_queue.pending_count or self.predict_lock.locked():
                     raise RuntimeError("仍有上传或识别任务，请等待完成后再更新")
                 start_update(core.BASE_DIR, self.update_offer, os.getpid(), list(sys.argv))
@@ -785,8 +964,8 @@ def main():
     else:
         gui = None
     app = WebViewApp()
-    app.create_window("main")
-    app.start_hotkeys()
+    app.create_window("gate")
+    app.start_startup_check()
     signal.signal(signal.SIGINT, lambda _signum, _frame: app.close())
     icon_name = "favicon.png" if sys.platform == "darwin" else "favicon.ico"
     try:

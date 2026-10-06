@@ -7,10 +7,16 @@ import json
 import pathlib
 import re
 import subprocess
+import sys
 import zipfile
 
 
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPOSITORY_ROOT / "client" / "data-entry"))
+
+from app_updater import validate_update_policy, version_is_at_least
+
+
 CLIENT_PREFIX = "client/data-entry/"
 TAG_PATTERN = re.compile(r"data-entry/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
@@ -33,6 +39,16 @@ def version_from_source(source):
             if isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str):
                 return statement.value.value
     raise ValueError("version.py must contain a literal __version__ string")
+
+
+def validate_release_version(tag, minimum_supported_version):
+    match = TAG_PATTERN.fullmatch(tag)
+    if match is None:
+        raise ValueError("Expected tag data-entry/vMAJOR.MINOR.PATCH")
+    version = ".".join(match.groups())
+    if not version_is_at_least(version, minimum_supported_version):
+        raise ValueError("Release version must not be below the minimum supported policy version")
+    return version
 
 
 def tracked_files(tag):
@@ -68,10 +84,8 @@ def write_entry(archive, name, contents):
 
 
 def build(tag, output_path):
-    match = TAG_PATTERN.fullmatch(tag)
-    if match is None:
-        raise ValueError("Expected tag data-entry/vMAJOR.MINOR.PATCH")
-    version = ".".join(match.groups())
+    policy = validate_update_policy((REPOSITORY_ROOT / "update-policy.json").read_bytes())
+    version = validate_release_version(tag, policy["minimum_supported_version"])
     commit = git("rev-parse", f"{tag}^{{commit}}").decode("ascii").strip()
     files = sorted(tracked_files(tag))
     if not files:

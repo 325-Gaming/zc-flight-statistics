@@ -3,6 +3,8 @@ let state = null;
 let selectedRecord = null;
 let selectedMenu = null;
 let themeSequence = 0;
+let gatePollTimer = null;
+let gateActionPending = false;
 const appElement = document.getElementById('app');
 const dialogLayer = document.getElementById('dialog-layer');
 const localStyles = new Set(['classic']);
@@ -437,6 +439,87 @@ function renderUpdate() {
   };
 }
 
+function renderGate() {
+  const phase = state.phase;
+  const required = phase === 'required' || phase === 'installing-required';
+  const installing = phase.startsWith('installing-');
+  let actions = '';
+  if (phase === 'error') {
+    actions = '<button id="gate-retry" class="primary">重试</button><button id="gate-exit">退出</button>';
+  } else if (phase === 'required') {
+    const retry = state.message?.startsWith('更新失败：');
+    actions = `<button id="gate-install" class="primary">${retry ? '重试更新' : '立即更新'}</button>
+      <button id="gate-exit">退出</button>`;
+  } else if (phase === 'optional') {
+    actions = '<button id="gate-continue">稍后使用</button><button id="gate-install" class="primary">立即更新</button><button id="gate-exit">退出</button>';
+  } else if (phase === 'checking') {
+    actions = '<button id="gate-exit">退出</button>';
+  } else if (installing) {
+    actions = '<button id="gate-exit">退出</button>';
+  }
+  appElement.innerHTML = `<div class="content gate-view">
+    <h2>${required ? '需要更新后才能继续' :
+      phase === 'optional' || phase === 'installing-optional' ? '发现可选更新' : '启动联网检查'}</h2>
+    <p>当前版本：${escapeHtml(state.current_version || '')}</p>
+    ${required ? `<p>最低支持版本：${escapeHtml(state.minimum_version || '')}；更新目标：${escapeHtml(state.version || '')}</p>` : ''}
+    ${phase === 'optional' || phase === 'installing-optional' ? `<p>可选更新版本：${escapeHtml(state.version || '')}</p>` : ''}
+    <p class="${phase === 'error' || state.message?.startsWith('更新失败：') ? 'error' : ''}" role="status">${escapeHtml(state.message || '正在检查…')}</p>
+    ${phase === 'checking' || installing ? '<div class="gate-spinner" aria-label="正在处理"></div>' : ''}
+    <div class="actions">${actions}</div></div>`;
+  const retry = document.getElementById('gate-retry');
+  if (retry) retry.onclick = () => gateAction('retry');
+  const exit = document.getElementById('gate-exit');
+  if (exit) exit.onclick = () => gateAction('exit');
+  const proceed = document.getElementById('gate-continue');
+  if (proceed) proceed.onclick = () => gateAction('continue');
+  const install = document.getElementById('gate-install');
+  if (install) install.onclick = () => {
+    if (phase === 'required' && state.message?.startsWith('更新失败：')) gateAction('retry');
+    else gateAction('install');
+  };
+}
+
+async function gateAction(name) {
+  if (gateActionPending) return;
+  gateActionPending = true;
+  try {
+    const result = await api(name);
+    if (name === 'retry' && !result?.failed) {
+      state = {...state, phase: 'checking', message: '正在重新连接官方更新服务…'};
+      renderGate();
+    } else if (name === 'install' && !result?.failed) {
+      state = {...state, phase: state.phase === 'required' ? 'installing-required' : 'installing-optional',
+        message: '正在下载并校验更新包…'};
+      renderGate();
+    } else if (name === 'enter' && result?.failed) {
+      state = {...state, phase: 'error', message: '客户端初始化失败，请重试检查或退出。'};
+      renderGate();
+      gatePollTimer = setTimeout(pollGate, 500);
+    }
+  } finally {
+    gateActionPending = false;
+  }
+}
+
+async function pollGate() {
+  if (view !== 'gate') return;
+  const result = await api('status');
+  if (!result?.failed) {
+    const changed = Object.keys(result).some(key => state[key] !== result[key]);
+    state = {...state, ...result};
+    if (changed) renderGate();
+    if (state.phase === 'ready') {
+      if (!gateActionPending) await gateAction('enter');
+      return;
+    }
+    if (state.phase === 'restarting') {
+      if (!gateActionPending) await gateAction('handoff');
+      return;
+    }
+  }
+  gatePollTimer = setTimeout(pollGate, 500);
+}
+
 async function checkForUpdate() {
   state.checking = true;
   renderUpdate();
@@ -454,6 +537,7 @@ function render() {
   else if (view === 'history') renderHistory();
   else if (view === 'settings') renderSettings();
   else if (view === 'update') renderUpdate();
+  else if (view === 'gate') renderGate();
   else if (view === 'page') renderPage();
   else if (view === 'statistics') renderStatistics();
   else if (view === 'preview') appElement.innerHTML = `<div class="content"><img class="preview-image" alt="显示器预览" src="${escapeHtml(state.image)}"></div>`;
@@ -486,6 +570,9 @@ window.addEventListener('pywebviewready', async () => {
     applyTheme(bootstrap.theme);
     render();
     if (view === 'update') await checkForUpdate();
+    if (view === 'gate') {
+      gatePollTimer = setTimeout(pollGate, 200);
+    }
   } catch (error) {
     appElement.innerHTML = `<div class="content error">无法加载窗口：${escapeHtml(error.message || error)}</div>`;
   }

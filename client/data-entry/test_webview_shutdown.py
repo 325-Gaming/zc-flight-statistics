@@ -3,6 +3,7 @@
 import importlib.util
 import pathlib
 import sys
+import threading
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -145,6 +146,7 @@ class WebViewShutdownTests(unittest.TestCase):
         app = module.WebViewApp.__new__(module.WebViewApp)
         app.logged_out = False
         app.update_offer = None
+        app.update_policy = {"minimum_supported_version": "2.2.0"}
         app.upload_queue = Mock(pending_count=0)
         app.predict_lock = module.threading.Lock()
         app.windows = {"main": Mock()}
@@ -167,12 +169,140 @@ class WebViewShutdownTests(unittest.TestCase):
         app = module.WebViewApp.__new__(module.WebViewApp)
         app.logged_out = False
         app.update_offer = {"available": True}
+        app.update_policy = {"minimum_supported_version": "2.2.0"}
         app.upload_queue = Mock(pending_count=1)
         app.predict_lock = module.threading.Lock()
         with patch.object(module, "start_update") as start:
             with self.assertRaisesRegex(RuntimeError, "上传或识别任务"):
                 app.action("update", "install", {})
         start.assert_not_called()
+
+    def test_business_actions_and_hotkeys_are_locked_before_startup_check(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.startup_complete = False
+        app.update_policy = None
+        app.settings_open = False
+        app.closed = False
+        with self.assertRaisesRegex(RuntimeError, "启动联网检查尚未通过"):
+            app.action("main", "select", {"index": 0})
+        app._register_hotkeys = Mock()
+        app.start_hotkeys()
+        app._register_hotkeys.assert_not_called()
+
+    def test_required_gate_cannot_continue_or_start_update_without_explicit_install(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.startup_complete = False
+        app.closed = False
+        app.gate_lock = threading.RLock()
+        app.gate_state = {"phase": "required"}
+        app.update_offer = {"available": True, "version": "2.2.0"}
+        with self.assertRaisesRegex(ValueError, "尚未允许进入"):
+            app.action("gate", "continue", {})
+        with patch.object(module.threading, "Thread") as thread:
+            self.assertEqual(app.action("gate", "install", {}), {"started": True})
+        thread.assert_called_once()
+        self.assertEqual(app.gate_state["phase"], "installing-required")
+
+    def test_gate_retry_deduplicates_an_active_startup_check(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.closed = False
+        app.startup_active = True
+        app.gate_lock = threading.RLock()
+        app.gate_state = {"phase": "error", "message": "offline"}
+        with patch.object(module.threading, "Thread") as thread:
+            self.assertEqual(app.action("gate", "retry", {}), {"started": True})
+        thread.assert_not_called()
+        self.assertEqual(app.gate_state["phase"], "error")
+
+    def test_startup_policy_failure_stays_in_retry_or_exit_gate(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.closed = False
+        app.gate_lock = threading.RLock()
+        app.startup_active = True
+        app.gate_state = {"phase": "checking"}
+        with patch.object(module, "recover_incomplete_update"), \
+             patch.object(module, "fetch_update_policy", side_effect=ValueError("HTTP 503")), \
+             patch.object(module, "read_update_failure") as read_failure, \
+             patch.object(module, "check_startup_update") as check:
+            app._run_startup_check()
+        read_failure.assert_not_called()
+        check.assert_not_called()
+        self.assertEqual(app.gate_state["phase"], "error")
+        self.assertIn("HTTP 503", app.gate_state["message"])
+        self.assertFalse(app.startup_active)
+
+    def test_startup_required_result_waits_for_user_to_install(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.closed = False
+        app.gate_lock = threading.RLock()
+        app.startup_active = True
+        app.gate_state = {"phase": "checking"}
+        offer = {"available": True, "version": "2.3.0"}
+        with patch.object(module, "recover_incomplete_update"), \
+             patch.object(module, "fetch_update_policy", return_value={
+                 "minimum_supported_version": "2.2.0",
+                 "message": "需更新",
+             }), \
+             patch.object(module, "read_update_failure", return_value=None), \
+             patch.object(module, "check_startup_update", return_value={
+                 "required": True, "offer": offer,
+             }), \
+             patch.object(module, "start_update") as install:
+            app._run_startup_check()
+        self.assertEqual(app.gate_state["phase"], "required")
+        self.assertEqual(app.update_offer, offer)
+        install.assert_not_called()
+
+    def test_explicit_gate_install_prepares_update_and_only_then_hands_off(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.closed = False
+        app.gate_lock = threading.RLock()
+        app.gate_state = {"phase": "installing-required"}
+        app.update_offer = {"version": "2.3.0"}
+        app.update_policy = {"minimum_supported_version": "2.2.0"}
+        with patch.object(module, "start_update") as install, \
+             patch.object(module, "os") as os_module:
+            os_module.getpid.return_value = 321
+            app._prepare_gate_update()
+        install.assert_called_once()
+        self.assertEqual(app.gate_state["phase"], "restarting")
+
+    def test_background_result_never_touches_a_closed_gate(self):
+        module = self._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.closed = True
+        app.gate_lock = threading.RLock()
+        app.startup_active = True
+        app.gate_state = {"phase": "error", "message": "closed"}
+        with patch.object(module, "recover_incomplete_update"), \
+             patch.object(module, "fetch_update_policy", return_value={
+                 "minimum_supported_version": "2.2.0",
+             }), \
+             patch.object(module, "read_update_failure", return_value=None), \
+             patch.object(module, "check_startup_update", return_value={
+                 "required": False, "offer": {"available": False},
+             }):
+            app._run_startup_check()
+        self.assertEqual(app.gate_state, {"phase": "error", "message": "closed"})
+        self.assertFalse(app.startup_active)
+
+    def test_closing_gate_after_successful_entry_keeps_main_window_open(self):
+        module = self._load_app_module()
+        gate = Mock()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.windows = {"gate": gate, "main": Mock()}
+        app.closed = False
+        app.startup_complete = True
+        app.close = Mock()
+        app._window_closed("gate", gate)
+        app.close.assert_not_called()
+        self.assertIn("main", app.windows)
 
 
 if __name__ == "__main__":

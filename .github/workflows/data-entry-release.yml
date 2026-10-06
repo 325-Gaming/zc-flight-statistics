@@ -44,6 +44,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.select.outputs.tag }}
         run: |
+          python3 .github/scripts/validate_data_entry_update_policy.py
           if [[ ! "$RELEASE_TAG" =~ ^data-entry/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "Invalid release tag: $RELEASE_TAG" >&2
             exit 1
