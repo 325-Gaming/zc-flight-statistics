@@ -166,9 +166,9 @@ Git 更新会保留被忽略的本地配置、乘客名单、`.env`、模型和�
 
 ##### 发布客户端版本
 
-发布前先更新 `client/data-entry/version.py` 和 `CHANGELOG.md`，提交并将目标提交推送到本仓库的 `master`。然后为该提交创建并推送 `data-entry/vX.Y.Z` 标签，其中 `X.Y.Z` 必须与 `version.py` 一致。推送标签不会立即发布。GitHub Actions 在北京时间每天 03:25 检查一次：从高于现有最新 data-entry Release 的标签中，选择版本号最大的未发布 `data-entry/vX.Y.Z` 标签，并从标签对应的已提交文件生成 `data-entry-vX.Y.Z.zip` 和包内的 `release-manifest.json`，校验后创建 GitHub Release。已有 Release（包括草稿）不会重复创建；旧版未发布标签也不会在新版发布后补发。若要按顺序发布多个版本，应按顺序推送标签并等待各自的定时检查。
+发布前先更新 `client/data-entry/version.py` 和 `CHANGELOG.md`，提交并将目标提交推送到本仓库的 `master`。然后为该提交创建并推送 `data-entry/vX.Y.Z` 标签，其中 `X.Y.Z` 必须与 `version.py` 一致。推送标签后，GitHub Actions 会立即校验标签和提交，从标签对应的已提交文件生成 `data-entry-vX.Y.Z.zip` 和包内的 `release-manifest.json`，然后创建 GitHub Release。请按顺序推送多个版本的标签，并等待前一个版本发布完成后再推送下一个。
 
-也可以在 GitHub Actions 的 **Data-entry release → Run workflow** 中填写已推送的标签，立即手动发布；对应命令为 `gh workflow run data-entry-release.yml --ref master -f tag=data-entry/vX.Y.Z`。手动运行仍会检查标签格式、标签提交是否属于 `master`，且标签中的版本号必须与 `version.py` 一致。定时任务可能因 GitHub Actions 繁忙而晚于 03:25 开始。
+也可以在 GitHub Actions 的 **Data-entry release → Run workflow** 中填写已推送的标签，手动发布；对应命令为 `gh workflow run data-entry-release.yml --ref master -f tag=data-entry/vX.Y.Z`。手动运行同样会检查标签格式、标签提交是否属于 `master`，且标签中的版本号必须与 `version.py` 一致。
 
 发布包不包含本地配置、名单、模型、虚拟环境或测试文件。2.2.0 起可从客户端菜单更新后自动重启；2.3.0 起启动时必须在线验证官方策略，策略不可用时不能离线进入客户端。2.3.1 起，已达最低版本的客户端只在官方 `version.py` 高于本机版本时查询 GitHub Releases 列表；提示文件或可选 Release 查询失败不阻止启动。低于门槛或需要恢复更新事务时仍强制在线验证稳定版 Release。普通更新继续通过客户端菜单手动检查。首次安装或从 ZIP/Release 安装的旧版升级时仍需手动下载发布包并运行 `install.bat`；Git 安装用户可按下节直接更新仓库。
 

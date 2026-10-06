@@ -1,9 +1,9 @@
 name: Data-entry release
 
 on:
-  schedule:
-    - cron: '25 3 * * *'
-      timezone: 'Asia/Shanghai'
+  push:
+    tags:
+      - 'data-entry/v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -31,12 +31,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REQUESTED_TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ github.token }}
+          PUSHED_TAG: ${{ github.ref_name }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
           else
-            python3 .github/scripts/select_data_entry_release.py >> "$GITHUB_OUTPUT"
+            echo "tag=$PUSHED_TAG" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Validate and package data-entry
