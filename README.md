@@ -122,13 +122,55 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File client/data-entry/instal
 
 Windows 安装流程的集成检查可通过 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File client/data-entry/test_windows_install.ps1` 执行。检查会在包含空格和中文的临时目录中真实下载依赖，验证首次安装、重复安装保留数据及并发安装拦截，不会读取真实 token 或连接业务接口。临时目录会保留并在结束时输出位置，检查完成后可自行删除。
 
+##### 从 Git 安装的 1.0.0 升级
+
+以下步骤适用于通过 `git clone` 获取本仓库、当前代码仍为 1.0.0 的用户。升级前先关闭客户端；建议将 `client/data-entry/config.json`、`client/data-entry/name.csv` 和 `client/data-entry/.env` 复制到仓库目录之外备份。
+
+1. 在仓库根目录打开终端，检查当前分支和本地修改：
+
+   ```bash
+   git status --short --branch
+   git branch --show-current
+   ```
+
+   本教程针对 `master` 分支。如果有未提交的源码修改，或当前分支不是 `master`，请先备份并处理好这些修改，不要直接继续更新。
+
+2. 在仓库根目录运行以下命令，将代码快进到最新版本：
+
+   ```bash
+   git pull --ff-only origin master
+   ```
+
+   如果命令提示无法快进或有冲突，请停止操作并先备份仓库；不要使用强制覆盖或重置命令。
+
+3. 按操作系统更新依赖并启动客户端。
+
+   **Windows：**在仓库根目录依次运行：
+
+   ```powershell
+   .\client\data-entry\install.bat
+   .\client\data-entry\start.bat
+   ```
+
+   **macOS/Linux：**在仓库根目录运行以下命令。若仓库根目录还没有 `.venv`，先运行第一行创建；已有虚拟环境时跳过第一行。
+
+   ```bash
+   python3 -m venv .venv
+   .venv/bin/python -m pip install -r client/data-entry/requirements.txt
+   .venv/bin/python client/data-entry/webview_app.py
+   ```
+
+4. 首次启动新版时，按提示使用拥有 `zc.flight_user` 权限的 QQ 或邮箱账号登录羽bot个人中心。新版不再使用 1.0.0 的固定登录 token；如果 `.env` 中还有 `ZCFLIGHT_LOGIN_TOKEN`，可删除这一行，但不要删除其中其他自定义接口地址。启动时需要联网验证官方更新策略。
+
+Git 更新会保留被忽略的本地配置、乘客名单、`.env`、模型和虚拟环境；仍建议先备份。升级后如果提示 `config.json` 无效，请在“文件 → 设置…”中检查活动名称、卡池和乘客名单文件设置。
+
 ##### 发布客户端版本
 
 发布前先更新 `client/data-entry/version.py` 和 `CHANGELOG.md`，提交并将目标提交推送到本仓库的 `master`。然后为该提交创建并推送 `data-entry/vX.Y.Z` 标签，其中 `X.Y.Z` 必须与 `version.py` 一致。推送标签不会立即发布。GitHub Actions 在北京时间每天 03:25 检查一次：从高于现有最新 data-entry Release 的标签中，选择版本号最大的未发布 `data-entry/vX.Y.Z` 标签，并从标签对应的已提交文件生成 `data-entry-vX.Y.Z.zip` 和包内的 `release-manifest.json`，校验后创建 GitHub Release。已有 Release（包括草稿）不会重复创建；旧版未发布标签也不会在新版发布后补发。若要按顺序发布多个版本，应按顺序推送标签并等待各自的定时检查。
 
 也可以在 GitHub Actions 的 **Data-entry release → Run workflow** 中填写已推送的标签，立即手动发布；对应命令为 `gh workflow run data-entry-release.yml --ref master -f tag=data-entry/vX.Y.Z`。手动运行仍会检查标签格式、标签提交是否属于 `master`，且标签中的版本号必须与 `version.py` 一致。定时任务可能因 GitHub Actions 繁忙而晚于 03:25 开始。
 
-发布包不包含本地配置、名单、模型、虚拟环境或测试文件。2.2.0 起可从客户端菜单更新后自动重启；2.3.0 起启动时必须在线验证官方策略，策略不可用时不能离线进入客户端。2.3.1 起，已达最低版本的客户端只在官方 `version.py` 高于本机版本时查询 GitHub Releases 列表；提示文件或可选 Release 查询失败不阻止启动。低于门槛或需要恢复更新事务时仍强制在线验证稳定版 Release。普通更新继续通过客户端菜单手动检查。首次安装或从旧版升级时仍需手动下载发布包并运行 `install.bat`。
+发布包不包含本地配置、名单、模型、虚拟环境或测试文件。2.2.0 起可从客户端菜单更新后自动重启；2.3.0 起启动时必须在线验证官方策略，策略不可用时不能离线进入客户端。2.3.1 起，已达最低版本的客户端只在官方 `version.py` 高于本机版本时查询 GitHub Releases 列表；提示文件或可选 Release 查询失败不阻止启动。低于门槛或需要恢复更新事务时仍强制在线验证稳定版 Release。普通更新继续通过客户端菜单手动检查。首次安装或从 ZIP/Release 安装的旧版升级时仍需手动下载发布包并运行 `install.bat`；Git 安装用户可按下节直接更新仓库。
 
 ##### 手动安装（开发及其他平台）
 
