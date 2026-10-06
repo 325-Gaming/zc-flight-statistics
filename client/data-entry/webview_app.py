@@ -22,6 +22,7 @@ import main as core
 from app_updater import (
     check_startup_update,
     check_update,
+    fetch_official_version,
     fetch_update_policy,
     read_update_failure,
     recover_incomplete_update,
@@ -56,6 +57,7 @@ from page_style_settings import (
 
 
 UI_PATH = str(core.BASE_DIR / "webview_ui/index.html")
+GATE_UI_PATH = str(core.BASE_DIR / "webview_ui/gate.html")
 WINDOWS = {
     "main": (f"{core._name} {core._version}", 1024, 800, (860, 680)),
     "import": ("导入乘客名单", 560, 440, (420, 320)),
@@ -165,6 +167,7 @@ class WebViewApp:
         self.gate_state = {"phase": "checking", "message": "正在连接官方更新服务…"}
         self.startup_active = False
         self.hotkey_listener = None
+        self.hotkey_start_lock = threading.RLock()
         self.user_name_list = list(core.user_name_list)
         if not self.user_name_list:
             self.user_name_list.append("乘客1")
@@ -335,21 +338,40 @@ class WebViewApp:
             raise
         return _ScheduledHotkeyListener(listener, scheduler) if scheduler is not None else listener
 
-    def start_hotkeys(self):
+    def start_hotkeys(self, raise_on_error=False):
         if self.settings_open or self.closed or not self.update_policy:
             return
-        try:
-            self.hotkey_listener = self._register_hotkeys(
-                {key: getattr(core, key) for key in HOTKEY_KEYS}
-            )
-        except (RuntimeError, ValueError) as error:
-            self._set_status(f"全局快捷键不可用：{error}")
+        with self.hotkey_start_lock:
+            try:
+                with self.gate_lock:
+                    if self.settings_open or self.closed or not self.update_policy:
+                        return
+                    if self.hotkey_listener is not None:
+                        raise RuntimeError("上次快捷键注册尚未清理，无法重复注册")
+                listener = self._register_hotkeys(
+                    {key: getattr(core, key) for key in HOTKEY_KEYS}
+                )
+                if listener is None:
+                    return
+                with self.gate_lock:
+                    self.hotkey_listener = listener
+                    should_stop = self.closed or self.settings_open or not self.update_policy
+                if should_stop:
+                    self._stop_hotkeys()
+            except (RuntimeError, ValueError) as error:
+                if raise_on_error:
+                    raise
+                self._set_status(f"全局快捷键不可用：{error}")
 
     def _stop_hotkeys(self):
-        listener = self.hotkey_listener
-        self.hotkey_listener = None
-        if listener is not None:
-            listener.stop()
+        with self.hotkey_start_lock:
+            with self.gate_lock:
+                listener = self.hotkey_listener
+            if listener is not None:
+                listener.stop()
+                with self.gate_lock:
+                    if self.hotkey_listener is listener:
+                        self.hotkey_listener = None
 
     def _predict(self):
         if not self.predict_lock.acquire(blocking=False):
@@ -371,13 +393,13 @@ class WebViewApp:
         title, width, height, minimum = WINDOWS[view]
         window = webview.create_window(
             title,
-            UI_PATH,
+            GATE_UI_PATH if view == "gate" else UI_PATH,
             js_api=Bridge(self, view),
             width=width,
             height=height,
             min_size=minimum,
             resizable=view not in {"statistics"},
-            background_color="#f2f5fa",
+            background_color="#050c10" if view == "gate" else "#f2f5fa",
         )
         self.windows[view] = window
         window.events.closed += lambda: self._window_closed(view, window)
@@ -401,10 +423,31 @@ class WebViewApp:
             recover_incomplete_update(core.BASE_DIR)
             policy = fetch_update_policy()
             failure = read_update_failure(core.BASE_DIR)
-            result = check_startup_update(
-                core._version_number, policy["minimum_supported_version"],
-                force_repair=failure is not None,
+            minimum_version = policy["minimum_supported_version"]
+            required = (
+                not version_is_at_least(core._version_number, minimum_version)
+                or failure is not None
             )
+            official_version = None
+            if not required:
+                try:
+                    official_version = fetch_official_version()
+                except (OSError, RuntimeError, ValueError, httpx.HTTPError) as error:
+                    print(
+                        f"官方 version.py 检查失败，不影响已达标客户端启动：{error}",
+                        file=sys.stderr,
+                    )
+            result = check_startup_update(
+                core._version_number, minimum_version,
+                force_repair=failure is not None,
+                official_version=official_version,
+            )
+            if result.get("check_error"):
+                print(
+                    f"可选 GitHub Release 检查失败，不影响已达标客户端启动："
+                    f"{result['check_error']}",
+                    file=sys.stderr,
+                )
             offer = result["offer"]
             if result["required"]:
                 state = {
@@ -471,8 +514,9 @@ class WebViewApp:
             print(f"更新准备失败：{message}", file=sys.stderr)
 
     def _window_closed(self, view, window):
-        if self.windows.get(view) is window:
-            del self.windows[view]
+        if self.windows.get(view) is not window:
+            return
+        del self.windows[view]
         if view == "settings":
             self.settings_open = False
             self.start_hotkeys()
@@ -480,9 +524,10 @@ class WebViewApp:
             self.close()
 
     def close(self):
-        if self.closed:
-            return
-        self.closed = True
+        with self.gate_lock:
+            if self.closed:
+                return
+            self.closed = True
         self.upload_queue.close(wait=False)
         for window in list(self.windows.values()):
             try:
@@ -690,34 +735,24 @@ class WebViewApp:
                 self._begin_startup_check()
                 return {"started": True}
             if name == "exit":
-                window = self.windows.get("gate")
-                if window is not None:
-                    timer = threading.Timer(0.2, window.destroy)
-                    timer.daemon = True
-                    timer.start()
+                self.close()
                 return {"closing": True}
             if name in {"continue", "enter"}:
                 with self.gate_lock:
                     phase = self.gate_state.get("phase")
                     if phase not in {"ready", "optional"}:
                         raise ValueError("启动检查尚未允许进入客户端")
+                    if self.closed or self.startup_complete:
+                        raise ValueError("启动门禁已关闭或客户端已经启动")
                     self.gate_state = {"phase": "entering", "message": "正在打开客户端…"}
-                self._current_user(self.user_id)
-                with self.gate_lock:
-                    self.startup_complete = True
-                self.create_window("main")
-                self.start_hotkeys()
-                window = self.windows.get("gate")
-                if window is not None:
-                    timer = threading.Timer(0.3, window.destroy)
-                    timer.daemon = True
-                    timer.start()
-                return {"entered": True}
+                return self._enter_client()
             if name == "install":
                 with self.gate_lock:
                     phase = self.gate_state.get("phase")
                     if phase not in {"required", "optional"} or not self.update_offer:
                         raise ValueError("当前没有可验证的更新目标")
+                    if phase == "required" and payload.get("confirmed") is not True:
+                        raise ValueError("强制更新必须经用户确认后才能开始")
                     self.gate_state["phase"] = (
                         "installing-required" if phase == "required" else "installing-optional"
                     )
@@ -807,6 +842,7 @@ class WebViewApp:
                 timer.start()
                 return {"restarting": True}
             raise ValueError("不支持的操作")
+
         if view == "main":
             if name == "select":
                 index = int(payload["index"])
@@ -955,6 +991,63 @@ class WebViewApp:
                 self._emit(target, {"theme": self.page_style})
             return settings
         raise ValueError("不支持的操作")
+
+    def _enter_client(self):
+        main_window = None
+        try:
+            nickname = self.nickname
+            if nickname != self.last_synced_user:
+                if not core.request_set_current_user(nickname):
+                    raise RuntimeError(f"同步当前乘客“{nickname}”失败，请检查网络后重试")
+                self.last_synced_user = nickname
+
+            with self.gate_lock:
+                if self.closed:
+                    raise RuntimeError("启动门禁已关闭")
+                if "main" in self.windows:
+                    raise RuntimeError("主界面已存在，无法安全重试进入")
+                self.create_window("main")
+                main_window = self.windows.get("main")
+
+            self.start_hotkeys(raise_on_error=True)
+
+            with self.gate_lock:
+                if self.closed:
+                    raise RuntimeError("启动门禁已关闭")
+                self.startup_complete = True
+                self.gate_state = {"phase": "entered", "message": "客户端已启动"}
+
+            gate_window = self.windows.get("gate")
+            if gate_window is not None:
+                timer = threading.Timer(0.3, gate_window.destroy)
+                timer.daemon = True
+                timer.start()
+            return {"entered": True}
+        except Exception as error:
+            try:
+                self._stop_hotkeys()
+            except Exception as cleanup_error:
+                print(f"启动失败后清理快捷键失败：{cleanup_error}", file=sys.stderr)
+            with self.gate_lock:
+                self.startup_complete = False
+                if main_window is None:
+                    main_window = self.windows.pop("main", None)
+                elif self.windows.get("main") is main_window:
+                    del self.windows["main"]
+                if not self.closed:
+                    self.gate_state = {
+                        "phase": "error",
+                        "message": f"进入客户端失败：{error or '未知错误'}",
+                    }
+            if main_window is not None:
+                try:
+                    main_window.destroy()
+                except Exception as cleanup_error:
+                    print(f"启动失败后关闭主窗口失败：{cleanup_error}", file=sys.stderr)
+            if self.closed:
+                return {"failed": True, "error": str(error)}
+            print(f"进入客户端失败：{error}", file=sys.stderr)
+            return {"failed": True, "error": str(error)}
 
 
 def main():

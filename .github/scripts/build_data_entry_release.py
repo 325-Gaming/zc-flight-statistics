@@ -20,6 +20,16 @@ from app_updater import validate_update_policy, version_is_at_least
 CLIENT_PREFIX = "client/data-entry/"
 TAG_PATTERN = re.compile(r"data-entry/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+REQUIRED_WEBVIEW_ASSETS = {
+    "webview_ui/gate.html",
+    "webview_ui/gate.css",
+    "webview_ui/fonts/fusion-pixel.css",
+    "webview_ui/fonts/fusion-pixel-12px-proportional-ja.otf.woff2",
+    "webview_ui/fonts/fusion-pixel-12px-proportional-latin.otf.woff2",
+    "webview_ui/fonts/fusion-pixel-12px-proportional-zh_hans.otf.woff2",
+    "webview_ui/licenses/OFL.txt",
+}
+FONT_URL_PATTERN = re.compile(r"""url\(["']?([^)"']+\.woff2)["']?\)""")
 
 
 def git(*arguments):
@@ -76,6 +86,27 @@ def tracked_files(tag):
         yield relative_path, object_id
 
 
+def validate_webview_assets(files):
+    missing = REQUIRED_WEBVIEW_ASSETS - files.keys()
+    if missing:
+        raise ValueError(f"Release is missing required WebView assets: {', '.join(sorted(missing))}")
+    try:
+        stylesheet = files["webview_ui/fonts/fusion-pixel.css"].decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("Fusion Pixel stylesheet must be UTF-8") from error
+    font_urls = FONT_URL_PATTERN.findall(stylesheet)
+    if not font_urls:
+        raise ValueError("Fusion Pixel stylesheet does not reference local WOFF2 fonts")
+    for url in font_urls:
+        font_path = pathlib.PurePosixPath("webview_ui/fonts") / url
+        if (
+            url.startswith("/") or "\\" in url
+            or any(part in {"", ".", ".."} for part in pathlib.PurePosixPath(url).parts)
+            or font_path.as_posix() not in files
+        ):
+            raise ValueError(f"Fusion Pixel font URL is not packaged locally: {url}")
+
+
 def write_entry(archive, name, contents):
     info = zipfile.ZipInfo(name, ZIP_TIMESTAMP)
     info.compress_type = zipfile.ZIP_DEFLATED
@@ -93,6 +124,7 @@ def build(tag, output_path):
     objects = {name: git("cat-file", "blob", object_id) for name, object_id in files}
     if "version.py" not in objects:
         raise ValueError("The tag does not contain client/data-entry/version.py")
+    validate_webview_assets(objects)
     if version_from_source(objects["version.py"]) != version:
         raise ValueError("Tag version does not match client/data-entry/version.py")
     manifest = {

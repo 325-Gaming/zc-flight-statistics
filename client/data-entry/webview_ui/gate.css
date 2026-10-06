@@ -1,0 +1,104 @@
+html.dark.gate-page {
+  color-scheme: dark;
+  --gate-background: #050c10;
+  --gate-panel: #0f191c;
+  --gate-text: #c8f3e5;
+  --gate-muted: #82a69a;
+  --gate-border: #345650;
+  --gate-accent: #00edb8;
+  --gate-accent-hover: #1c725d;
+  --gate-button: #1b3331;
+}
+
+html.dark.gate-page body {
+  background: var(--gate-background);
+  color: var(--gate-text);
+  font-family: var(--fusion-pixel-font-family);
+}
+
+html.dark.gate-page #app {
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+
+html.dark.gate-page .content.gate-view {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  max-height: 100%;
+  padding: 22px 26px;
+  border: 1px solid var(--gate-border);
+  background:
+    radial-gradient(ellipse at 50% 0, rgb(0 237 184 / 9%), transparent 58%),
+    var(--gate-panel);
+  box-shadow: 0 0 24px rgb(0 237 184 / 8%), inset 0 0 22px rgb(0 237 184 / 3%);
+}
+
+html.dark.gate-page .gate-view h2 {
+  margin-top: 0;
+  color: #eafff7;
+  text-shadow: 0 0 8px rgb(0 237 184 / 35%);
+}
+
+html.dark.gate-page .gate-view > p {
+  color: var(--gate-muted);
+}
+
+html.dark.gate-page .gate-view > p.error {
+  border: 1px solid #7e4f4d;
+  background: #3f2b2c;
+  color: #f2a8a3;
+}
+
+html.dark.gate-page .gate-view .actions {
+  margin-top: 18px;
+}
+
+html.dark.gate-page button {
+  border: 1px solid var(--gate-border);
+  border-radius: 0;
+  background: var(--gate-button);
+  color: var(--gate-text);
+}
+
+html.dark.gate-page button:hover:not(:disabled) {
+  border-color: var(--gate-accent);
+  background: #25423b;
+}
+
+html.dark.gate-page button.primary {
+  border-color: #145c4c;
+  background: #145c4c;
+  color: var(--gate-text);
+}
+
+html.dark.gate-page button.primary:hover:not(:disabled) {
+  background: var(--gate-accent-hover);
+}
+
+html.dark.gate-page .gate-spinner {
+  border-color: var(--gate-border);
+  border-top-color: var(--gate-accent);
+}
+
+html.dark.gate-page body::before {
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 2.5%) 0,
+    rgb(255 255 255 / 2.5%) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  content: "";
+  inset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.dark.gate-page .gate-spinner {
+    animation-duration: 2s;
+  }
+}

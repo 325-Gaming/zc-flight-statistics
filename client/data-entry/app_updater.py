@@ -23,9 +23,14 @@ UPDATE_POLICY_URL = (
     "https://raw.githubusercontent.com/325-Gaming/zc-flight-statistics/"
     "master/update-policy.json"
 )
+VERSION_SOURCE_URL = (
+    "https://raw.githubusercontent.com/325-Gaming/zc-flight-statistics/"
+    "master/client/data-entry/version.py"
+)
 TAG_PATTERN = re.compile(r"data-entry/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 VERSION_PATTERN = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 MAX_POLICY_SIZE = 16 * 1024
+MAX_VERSION_SOURCE_SIZE = 4 * 1024
 MAX_RELEASES_SIZE = 5 * 1024 * 1024
 MAX_ARCHIVE_SIZE = 100 * 1024 * 1024
 MAX_UNPACKED_SIZE = 150 * 1024 * 1024
@@ -136,6 +141,72 @@ def fetch_update_policy():
     except httpx.HTTPError as error:
         raise ValueError("无法连接官方更新策略服务") from error
     return validate_update_policy(bytes(payload))
+
+
+def validate_version_source(payload):
+    if not isinstance(payload, bytes) or len(payload) > MAX_VERSION_SOURCE_SIZE:
+        raise ValueError("官方 version.py 响应无效或超出大小限制")
+    try:
+        source = payload.decode("utf-8")
+        module = ast.parse(source, filename="version.py")
+    except (UnicodeDecodeError, SyntaxError, RecursionError) as error:
+        raise ValueError("官方 version.py 不是有效的 UTF-8 Python 文件") from error
+
+    assignments = []
+    for statement in module.body:
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__version__"
+            for target in statement.targets
+        ):
+            if (
+                len(statement.targets) != 1
+                or not isinstance(statement.targets[0], ast.Name)
+                or statement.targets[0].id != "__version__"
+                or not isinstance(statement.value, ast.Constant)
+                or not isinstance(statement.value.value, str)
+            ):
+                raise ValueError("官方 version.py 的版本号声明无效")
+            assignments.append(statement.value.value)
+        elif isinstance(statement, ast.AnnAssign) and (
+            isinstance(statement.target, ast.Name)
+            and statement.target.id == "__version__"
+        ):
+            raise ValueError("官方 version.py 的版本号声明无效")
+    if len(assignments) != 1:
+        raise ValueError("官方 version.py 必须且只能包含一个静态版本号")
+    _version_tuple(assignments[0])
+    return assignments[0]
+
+
+def fetch_official_version():
+    import httpx
+
+    timeout = httpx.Timeout(connect=5, read=10, write=5, pool=5)
+    try:
+        with httpx.stream(
+            "GET", VERSION_SOURCE_URL, follow_redirects=False, timeout=timeout,
+            headers={"Accept": "text/plain"},
+        ) as response:
+            if response.status_code != 200:
+                raise ValueError(f"官方 version.py 请求失败（HTTP {response.status_code}）")
+            length = response.headers.get("content-length")
+            if length is not None:
+                try:
+                    size = int(length)
+                except ValueError as error:
+                    raise ValueError("官方 version.py Content-Length 无效") from error
+                if size < 0 or size > MAX_VERSION_SOURCE_SIZE:
+                    raise ValueError("官方 version.py 响应超出大小限制")
+            payload = bytearray()
+            for chunk in response.iter_bytes():
+                payload.extend(chunk)
+                if len(payload) > MAX_VERSION_SOURCE_SIZE:
+                    raise ValueError("官方 version.py 响应超出大小限制")
+    except httpx.TimeoutException as error:
+        raise ValueError("连接或读取官方 version.py 超时") from error
+    except httpx.HTTPError as error:
+        raise ValueError("无法连接官方 version.py 服务") from error
+    return validate_version_source(bytes(payload))
 
 
 def _git(root, *args):
@@ -304,25 +375,68 @@ def _check_release(current_version, minimum_version=None, include_current=False)
     }
 
 
-def check_startup_update(current_version, minimum_version, force_repair=False):
+def check_startup_update(
+    current_version, minimum_version, force_repair=False, official_version=None,
+):
     current_tuple = _version_tuple(current_version)
     minimum_tuple = _version_tuple(minimum_version)
     required = current_tuple < minimum_tuple or force_repair
-    offer = _check_release(
-        current_version, minimum_version=minimum_version,
-        include_current=force_repair,
-    )
-    if required and not offer.get("available"):
-        raise ValueError("没有可验证的稳定版 Release 可用于完成强制更新")
-    if offer.get("available"):
+    if required:
+        offer = _check_release(
+            current_version, minimum_version=minimum_version,
+            include_current=force_repair,
+        )
+    else:
+        if (
+            official_version is None
+            or _version_tuple(official_version) <= current_tuple
+        ):
+            return {
+                "required": False,
+                "offer": {
+                    "available": False,
+                    "mode": "release",
+                    "current_version": current_version,
+                },
+            }
+        try:
+            offer = _check_release(current_version, minimum_version=minimum_version)
+        except ValueError as error:
+            return {
+                "required": False,
+                "offer": {
+                    "available": False,
+                    "mode": "release",
+                    "current_version": current_version,
+                },
+                "check_error": str(error),
+            }
+        if not offer.get("available"):
+            return {"required": False, "offer": offer}
         target_tuple = _version_tuple(offer["version"])
-        if target_tuple < minimum_tuple or target_tuple < current_tuple:
-            raise ValueError("更新目标版本无法满足最低支持版本")
-        if required and target_tuple == current_tuple and not force_repair:
-            raise ValueError("官方更新目标版本未达到最低支持版本")
-        if force_repair:
-            offer["force_dependencies"] = True
-    return {"required": required, "offer": offer}
+        if target_tuple < minimum_tuple or target_tuple <= current_tuple:
+            return {
+                "required": False,
+                "offer": {
+                    "available": False,
+                    "mode": "release",
+                    "current_version": current_version,
+                },
+            }
+        return {"required": False, "offer": offer}
+
+    if not offer.get("available"):
+        raise ValueError("没有可验证的稳定版 Release 可用于完成强制更新")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", offer.get("digest") or ""):
+        raise ValueError("强制更新目标缺少有效的 SHA-256 校验值")
+    target_tuple = _version_tuple(offer["version"])
+    if target_tuple < minimum_tuple or target_tuple < current_tuple:
+        raise ValueError("更新目标版本无法满足最低支持版本")
+    if target_tuple == current_tuple and not force_repair:
+        raise ValueError("官方更新目标版本未达到最低支持版本")
+    if force_repair:
+        offer["force_dependencies"] = True
+    return {"required": True, "offer": offer}
 
 
 def check_update(base_dir, current_version):

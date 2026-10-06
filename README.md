@@ -20,7 +20,7 @@ Zc航空抽卡统计数据录入客户端。程序会截取指定显示器，使
 - 支持单抽、十连全局快捷键，且可按操作单独关闭
 - 将识别结果和截图提交至统计接口
 - 启动时自动检查、校验并更新识别模型
-- 2.3.0 起启动时必须联网验证官方最低版本策略和稳定版 Release
+- 启动时必须联网验证官方最低版本策略；低于门槛或需要恢复更新事务时才检查稳定版 Release
 - 通过“文件 → 检查更新…”更新客户端代码并自动重启
 - 支持在运行时修改活动、切换卡池、显示器、乘客名单和快捷键
 - 支持查看所选显示器的截图预览
@@ -35,7 +35,11 @@ update-policy.json               # data-entry 官方最低支持版本策略
 client/data-entry/
 ├── main.py                      # 识别与原有 Tk 界面
 ├── webview_app.py               # WebView 程序入口及 Python 交互层
-├── webview_ui/                  # 页面、控件样式及随客户端提供的主题
+├── webview_ui/                  # 页面、控件样式、本地门禁深色样式及字体
+│   ├── gate.html                # 门禁窗口页面，通过 pywebview 本地服务加载
+│   ├── gate.css                 # 仅作用于启动门禁窗口的固定深色样式
+│   ├── fonts/                   # Fusion Pixel 字体和字体 CSS
+│   └── licenses/OFL.txt         # 字体许可
 ├── version.py                   # 客户端版本号
 ├── hotkeys.py                   # 跨平台全局快捷键
 ├── model_updater.py             # 识别模型更新工具
@@ -84,21 +88,27 @@ client/data-entry/
 
 运行环境保存在 `client/data-entry/.runtime/` 和 `.venv/`，不会修改系统 PATH、系统 Python 或 Conda 环境。`config.json`、`.env`、`name.csv` 和 `models/` 仍保存在客户端目录，可单独备份。安装完成前会检查依赖、ONNX Runtime 和 WebView2 Runtime；此步骤不会连接业务接口或上传数据。
 
-每次启动时，客户端都会在独立的启动门禁窗口中通过 HTTPS 读取官方最低版本策略，并检查官方 GitHub Release；完成检查前不会打开数据录入界面、注册快捷键或接受业务操作。策略唯一来源是仓库根目录 [`update-policy.json`](./update-policy.json)，客户端固定读取：
+每次启动时，客户端都会先在独立的启动门禁窗口中通过 HTTPS 读取并校验官方最低版本策略；策略检查成功前不会打开数据录入界面、注册快捷键或接受业务操作。策略唯一来源是仓库根目录 [`update-policy.json`](./update-policy.json)，客户端固定读取：
 
 ```text
 https://raw.githubusercontent.com/325-Gaming/zc-flight-statistics/master/update-policy.json
 ```
 
-策略格式为 `data-entry.schema_version`、严格的 `MAJOR.MINOR.PATCH` 格式 `minimum_supported_version` 和 1–500 字符的 `message`。客户端不读取本机、Release ZIP、Git remote、fork 或缓存中的策略。如果策略服务、Release 检查或响应校验失败，窗口会显示可诊断原因，只能重试或退出；离线时不能使用客户端。
+策略格式为 `data-entry.schema_version`、严格的 `MAJOR.MINOR.PATCH` 格式 `minimum_supported_version` 和 1–500 字符的 `message`。客户端不读取本机、Release ZIP、Git remote、fork 或缓存中的策略。如果策略服务或响应校验失败，窗口会显示原因，只能重试或退出；离线时不能使用客户端。
 
-只有本机版本低于 `minimum_supported_version`，或上次更新未完成/依赖安装失败，才会显示强制更新门禁。目标必须是版本不低于门槛、标签和包内版本相符的稳定版 Release，且发布资产、清单及文件校验全部有效。强制更新不会自动下载或安装；只有点击“立即更新”才会下载、校验、安装并重启，失败后只能重试或退出。普通更高稳定版只是可选更新，可选择“稍后使用”，之后也可通过“文件 → 检查更新…”安装。
+本机版本已达到 `minimum_supported_version` 且策略有效时，门禁会从固定的官方 HTTPS 地址读取 `client/data-entry/version.py`，仅静态解析其中的版本号，不执行远端代码。只有该版本号高于本机版本时，才查询 GitHub Releases 列表以确认是否已有可校验的稳定版更新目标；版本号相同或较低时不请求 Releases API。官方 `version.py` 请求失败或内容无效时，已达标客户端仍可启动，不查询 Releases API；可选 Release 查询失败也不阻止启动。普通新版本仍可通过“文件 → 检查更新…”手动查询和安装。
+
+本机版本低于门槛，或上次更新未完成/依赖安装失败时，客户端不使用 `version.py` 作为跳过依据，仍会在线检查官方稳定版 Release。必须找到满足门槛、标签与包内版本相符且具有有效资产和 SHA-256 校验值的目标；检查失败、目标缺失或校验无效时只能重试或退出。强制更新不会自动下载或安装；点击“立即更新”并在确认对话框中确认后，才会下载、校验、安装并重启。
+
+进入客户端前还会同步当前乘客、创建主窗口并注册快捷键；任一步骤失败都会清理已创建资源，回到带有错误详情、“重试”和“退出”操作的门禁状态。重试会重新在线验证策略及强制更新要求，不会直接跳过门禁。
+
+启动门禁使用本地固定的 dark 样式，不读取或写入 `localStorage`。页面在加载本地样式前即设置 dark 状态；`webview_ui/gate.css` 只匹配门禁页，Fusion Pixel 字体样式和字体文件位于 `webview_ui/fonts/`，不依赖个人中心页面或网络资源。Release 构建会验证门禁 CSS、字体 CSS 及其引用的字体文件均被打包。
 
 Git 普通仓库、Git worktree（`.git` 文件）及 ZIP/Release 安装都使用相同的官方策略和启动门禁。Git 安装的强制更新使用官方稳定 Release 包，不依赖本地分支或 remote 是否更新；普通菜单更新仍保留 Git 快进路径（要求干净工作区、有上游且目标版本不低于策略门槛）。Release 包更新会校验文件清单与 SHA-256，并保留 `.env`、`config.json`、`name.csv`、`models/`、`.runtime/`、`.venv/` 及其他个人文件。逐文件替换期间若进程中断，下次启动会恢复事务备份；若依赖安装中断或失败，则保持门禁并要求重新验证、下载和安装，以修复可能部分变更的虚拟环境。辅助进程日志位于 `.runtime/update.log`；门禁会展示错误和重试入口。Windows 使用现有安装器补装依赖；其他平台使用客户端或仓库 `.venv/`。
 
 #### 最低版本策略维护与发布顺序
 
-直接编辑仓库根目录 `update-policy.json` 中的 `minimum_supported_version` 和提示 `message`。Release 工作流在发布前校验 JSON、schema、字段及语义版本，并拒绝低于当前门槛的 Release 标签；仓库根目录策略不会复制进客户端 Release ZIP。提高门槛时，必须先发布不低于新门槛的稳定版客户端 Release，并确认资产已发布、可下载且通过客户端包校验；之后才能合并/发布提高门槛的策略变更，不能让门槛先于更新包生效。降低或撤销门槛会在客户端下一次成功联网检查时生效：符合新门槛的用户可能不再被强制更新，但启动仍要求在线验证策略和 Release 服务。发布客户端仍按下节通过 `data-entry/vX.Y.Z` 标签构建。
+直接编辑仓库根目录 `update-policy.json` 中的 `minimum_supported_version` 和提示 `message`。Release 工作流在发布前校验 JSON、schema、字段及语义版本，并拒绝低于当前门槛的 Release 标签；仓库根目录策略不会复制进客户端 Release ZIP。提高门槛时，必须先发布不低于新门槛的稳定版客户端 Release，并确认资产已发布、可下载且通过客户端包校验；之后才能合并/发布提高门槛的策略变更，不能让门槛先于更新包生效。启动时先强制验证策略；仅对已达标且无待恢复更新的客户端，官方 `version.py` 才作为 Releases API 查询提示。该提示请求失败不会放宽策略门槛，也不会阻止已达标客户端启动；低于门槛或需要恢复更新事务时始终强制验证稳定版 Release。发布客户端仍按下节通过 `data-entry/vX.Y.Z` 标签构建。
 
 `install.bat` 可重复执行以补齐依赖，不会覆盖已有配置、名单或模型。不要移动已经安装的目录：虚拟环境和桌面快捷方式依赖原路径。如果需要迁移，先关闭客户端，复制整个目录，删除新位置的 `.venv/` 和 `.runtime/`，再重新安装；保留 `.env`、配置、名单及模型。
 
@@ -118,7 +128,7 @@ Windows 安装流程的集成检查可通过 `powershell.exe -NoProfile -Executi
 
 也可以在 GitHub Actions 的 **Data-entry release → Run workflow** 中填写已推送的标签，立即手动发布；对应命令为 `gh workflow run data-entry-release.yml --ref master -f tag=data-entry/vX.Y.Z`。手动运行仍会检查标签格式、标签提交是否属于 `master`，且标签中的版本号必须与 `version.py` 一致。定时任务可能因 GitHub Actions 繁忙而晚于 03:25 开始。
 
-发布包不包含本地配置、名单、模型、虚拟环境或测试文件。2.2.0 起可从客户端菜单更新后自动重启；2.3.0 起每次启动还须联网检查官方策略与稳定版 Release，检查失败时不能离线进入客户端。首次安装或从旧版升级时仍需手动下载发布包并运行 `install.bat`。
+发布包不包含本地配置、名单、模型、虚拟环境或测试文件。2.2.0 起可从客户端菜单更新后自动重启；2.3.0 起启动时必须在线验证官方策略，策略不可用时不能离线进入客户端。2.3.1 起，已达最低版本的客户端只在官方 `version.py` 高于本机版本时查询 GitHub Releases 列表；提示文件或可选 Release 查询失败不阻止启动。低于门槛或需要恢复更新事务时仍强制在线验证稳定版 Release。普通更新继续通过客户端菜单手动检查。首次安装或从旧版升级时仍需手动下载发布包并运行 `install.bat`。
 
 ##### 手动安装（开发及其他平台）
 

@@ -5,6 +5,7 @@ let selectedMenu = null;
 let themeSequence = 0;
 let gatePollTimer = null;
 let gateActionPending = false;
+let gateClosed = false;
 const appElement = document.getElementById('app');
 const dialogLayer = document.getElementById('dialog-layer');
 const localStyles = new Set(['classic']);
@@ -55,7 +56,7 @@ async function api(name, payload = {}) {
   const response = await window.pywebview.api.action(name, payload);
   if (!response.ok) {
     await showDialog('操作失败', response.error || '未知错误');
-    return {failed: true};
+    return {failed: true, error: response.error || '未知错误'};
   }
   return response.data;
 }
@@ -452,7 +453,7 @@ function renderGate() {
       <button id="gate-exit">退出</button>`;
   } else if (phase === 'optional') {
     actions = '<button id="gate-continue">稍后使用</button><button id="gate-install" class="primary">立即更新</button><button id="gate-exit">退出</button>';
-  } else if (phase === 'checking') {
+  } else if (phase === 'checking' || phase === 'entering') {
     actions = '<button id="gate-exit">退出</button>';
   } else if (installing) {
     actions = '<button id="gate-exit">退出</button>';
@@ -464,60 +465,107 @@ function renderGate() {
     ${required ? `<p>最低支持版本：${escapeHtml(state.minimum_version || '')}；更新目标：${escapeHtml(state.version || '')}</p>` : ''}
     ${phase === 'optional' || phase === 'installing-optional' ? `<p>可选更新版本：${escapeHtml(state.version || '')}</p>` : ''}
     <p class="${phase === 'error' || state.message?.startsWith('更新失败：') ? 'error' : ''}" role="status">${escapeHtml(state.message || '正在检查…')}</p>
-    ${phase === 'checking' || installing ? '<div class="gate-spinner" aria-label="正在处理"></div>' : ''}
+    ${phase === 'checking' || phase === 'entering' || installing ? '<div class="gate-spinner" aria-label="正在处理"></div>' : ''}
     <div class="actions">${actions}</div></div>`;
   const retry = document.getElementById('gate-retry');
   if (retry) retry.onclick = () => gateAction('retry');
   const exit = document.getElementById('gate-exit');
-  if (exit) exit.onclick = () => gateAction('exit');
+  if (exit) exit.onclick = () => {
+    gateClosed = true;
+    clearTimeout(gatePollTimer);
+    gatePollTimer = null;
+    gateAction('exit');
+  };
   const proceed = document.getElementById('gate-continue');
   if (proceed) proceed.onclick = () => gateAction('continue');
   const install = document.getElementById('gate-install');
-  if (install) install.onclick = () => {
-    if (phase === 'required' && state.message?.startsWith('更新失败：')) gateAction('retry');
-    else gateAction('install');
+  if (install) install.onclick = async () => {
+    const confirmed = await showDialog(
+      required ? '确认强制更新' : '确认更新',
+      `确定下载并安装 ${escapeHtml(state.version || '')} 吗？客户端将在更新完成后重启。`,
+      true,
+    );
+    if (!confirmed || gateClosed) return;
+    gateAction('install', {confirmed: true});
   };
 }
 
-async function gateAction(name) {
-  if (gateActionPending) return;
-  gateActionPending = true;
+function scheduleGatePoll(delay = 500) {
+  if (view !== 'gate' || gateClosed) return;
+  clearTimeout(gatePollTimer);
+  gatePollTimer = setTimeout(pollGate, delay);
+}
+
+async function gateAction(name, payload = {}) {
+  if (gateActionPending && name !== 'exit') return;
+  const ownsPending = !gateActionPending;
+  if (ownsPending) gateActionPending = true;
   try {
-    const result = await api(name);
+    const result = await api(name, payload);
+    if (gateClosed && name !== 'exit') return;
+    if (name === 'exit' || name === 'handoff') {
+      gateClosed = true;
+      clearTimeout(gatePollTimer);
+      gatePollTimer = null;
+      return;
+    }
     if (name === 'retry' && !result?.failed) {
       state = {...state, phase: 'checking', message: '正在重新连接官方更新服务…'};
       renderGate();
+      scheduleGatePoll();
     } else if (name === 'install' && !result?.failed) {
       state = {...state, phase: state.phase === 'required' ? 'installing-required' : 'installing-optional',
         message: '正在下载并校验更新包…'};
       renderGate();
-    } else if (name === 'enter' && result?.failed) {
-      state = {...state, phase: 'error', message: '客户端初始化失败，请重试检查或退出。'};
+      scheduleGatePoll();
+    } else if (name === 'enter' && result?.entered) {
+      gateClosed = true;
+      clearTimeout(gatePollTimer);
+      gatePollTimer = null;
+    } else if (result?.failed) {
+      const status = await api('status');
+      if (gateClosed) return;
+      state = status?.failed
+        ? {...state, phase: 'error', message: result.error || '客户端初始化失败，请重试或退出。'}
+        : {...state, ...status};
       renderGate();
-      gatePollTimer = setTimeout(pollGate, 500);
     }
   } finally {
-    gateActionPending = false;
+    if (ownsPending) gateActionPending = false;
+    if (!gateClosed) scheduleGatePoll();
   }
 }
 
 async function pollGate() {
-  if (view !== 'gate') return;
-  const result = await api('status');
+  gatePollTimer = null;
+  if (view !== 'gate' || gateClosed) return;
+  if (gateActionPending) {
+    scheduleGatePoll();
+    return;
+  }
+  let result;
+  try {
+    result = await api('status');
+  } catch (error) {
+    console.error('启动门禁状态查询失败：', error);
+    scheduleGatePoll();
+    return;
+  }
+  if (view !== 'gate' || gateClosed) return;
   if (!result?.failed) {
     const changed = Object.keys(result).some(key => state[key] !== result[key]);
     state = {...state, ...result};
     if (changed) renderGate();
     if (state.phase === 'ready') {
-      if (!gateActionPending) await gateAction('enter');
+      await gateAction('enter');
       return;
     }
     if (state.phase === 'restarting') {
-      if (!gateActionPending) await gateAction('handoff');
+      await gateAction('handoff');
       return;
     }
   }
-  gatePollTimer = setTimeout(pollGate, 500);
+  scheduleGatePoll();
 }
 
 async function checkForUpdate() {
@@ -567,11 +615,11 @@ window.addEventListener('pywebviewready', async () => {
     const bootstrap = await window.pywebview.api.bootstrap();
     view = bootstrap.view;
     state = bootstrap.data;
-    applyTheme(bootstrap.theme);
+    if (view !== 'gate') applyTheme(bootstrap.theme);
     render();
     if (view === 'update') await checkForUpdate();
     if (view === 'gate') {
-      gatePollTimer = setTimeout(pollGate, 200);
+      scheduleGatePoll(200);
     }
   } catch (error) {
     appElement.innerHTML = `<div class="content error">无法加载窗口：${escapeHtml(error.message || error)}</div>`;

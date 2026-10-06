@@ -33,6 +33,7 @@ class WebViewShutdownTests(unittest.TestCase):
         queue = Mock()
         app = module.WebViewApp.__new__(module.WebViewApp)
         app.closed = False
+        app.gate_lock = threading.RLock()
         app.windows = {"main": main_window, "history": history_window}
         app.upload_queue = queue
 
@@ -200,8 +201,13 @@ class WebViewShutdownTests(unittest.TestCase):
         app.update_offer = {"available": True, "version": "2.2.0"}
         with self.assertRaisesRegex(ValueError, "尚未允许进入"):
             app.action("gate", "continue", {})
+        with self.assertRaisesRegex(ValueError, "用户确认"):
+            app.action("gate", "install", {})
         with patch.object(module.threading, "Thread") as thread:
-            self.assertEqual(app.action("gate", "install", {}), {"started": True})
+            self.assertEqual(
+                app.action("gate", "install", {"confirmed": True}),
+                {"started": True},
+            )
         thread.assert_called_once()
         self.assertEqual(app.gate_state["phase"], "installing-required")
 

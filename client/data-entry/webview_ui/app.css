@@ -1,22 +1,3 @@
-@font-face {
-  font-family: "fusion-pixel-12px-proportional-zh_hans";
-  src: url("fonts/fusion-pixel-12px-proportional-zh_hans.otf.woff2") format("woff2");
-  font-display: swap;
-}
-@font-face {
-  font-family: "fusion-pixel-12px-proportional-ja";
-  src: url("fonts/fusion-pixel-12px-proportional-ja.otf.woff2") format("woff2");
-  font-display: swap;
-}
-@font-face {
-  font-family: "fusion-pixel-12px-proportional-latin";
-  src: url("fonts/fusion-pixel-12px-proportional-latin.otf.woff2") format("woff2");
-  font-display: swap;
-}
-:root {
-  --fusion-pixel-font-family: "fusion-pixel-12px-proportional-zh_hans", "fusion-pixel-12px-proportional-latin", "Microsoft YaHei", "PingFang SC", sans-serif;
-  --fusion-pixel-ja-font-family: "fusion-pixel-12px-proportional-ja", "fusion-pixel-12px-proportional-latin", "Microsoft YaHei", "PingFang SC", sans-serif;
-}
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body[data-page-style] {
