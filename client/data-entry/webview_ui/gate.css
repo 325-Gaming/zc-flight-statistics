@@ -77,6 +77,63 @@ html.dark.gate-page button.primary:hover:not(:disabled) {
   background: var(--gate-accent-hover);
 }
 
+html.dark.gate-page button:active:not(:disabled) {
+  background: #102822;
+}
+
+html.dark.gate-page button.primary:active:not(:disabled) {
+  background: #104b3e;
+}
+
+html.dark.gate-page button:focus-visible {
+  outline: 2px solid var(--gate-accent);
+  outline-offset: 3px;
+}
+
+html.dark.gate-page #dialog-layer {
+  padding: 14px;
+  background: rgb(0 0 0 / 78%);
+}
+
+html.dark.gate-page .dialog-box {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  min-height: 0;
+  max-height: 100%;
+  background: var(--gate-panel);
+  border: 1px solid var(--gate-border);
+  color: var(--gate-text);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 70%);
+  overflow-wrap: anywhere;
+}
+
+html.dark.gate-page .dialog-box h2 {
+  flex: none;
+  color: #eafff7;
+}
+
+html.dark.gate-page .dialog-box p {
+  min-height: 0;
+  overflow-y: auto;
+  color: var(--gate-text);
+  scrollbar-color: var(--gate-border) var(--gate-panel);
+}
+
+html.dark.gate-page .dialog-box p::-webkit-scrollbar {
+  background: var(--gate-panel);
+}
+
+html.dark.gate-page .dialog-box p::-webkit-scrollbar-thumb {
+  background: var(--gate-border);
+}
+
+html.dark.gate-page .dialog-box .actions {
+  flex: none;
+  flex-wrap: wrap;
+  padding: 5px;
+}
+
 html.dark.gate-page .gate-spinner {
   border-color: var(--gate-border);
   border-top-color: var(--gate-accent);

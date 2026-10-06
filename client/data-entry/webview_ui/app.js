@@ -28,6 +28,12 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function formatEventNamePreview(eventName, poolName) {
+  const name = String(eventName ?? '').trim();
+  const pool = String(poolName ?? '').trim();
+  return name && pool ? `${name} ${pool}` : '—';
+}
+
 function showDialog(title, message, confirm = false, checkboxLabel = '') {
   return new Promise(resolve => {
     const previousFocus = document.activeElement;
@@ -115,6 +121,11 @@ function renderMain() {
   const captainTitle = captain ? `【${captain.title}】` : '资料暂不可用';
   const captainNickname = captain?.nickname || '';
   const captainText = `机长 ${captainTitle}${captainNickname ? ` ${captainNickname}` : ''}`;
+  const eventName = String(s.event_name ?? '').trim();
+  const poolName = String(s.pool_name ?? '').trim();
+  const currentFlight = formatEventNamePreview(eventName, poolName);
+  const hasCurrentFlight = Boolean(eventName && poolName);
+  const flightEventName = hasCurrentFlight ? `【${eventName}】` : '—';
   const menus = [
     ['文件', [['设置', 'settings'], ['检查更新…', 'update'], ['导入乘客名单…', 'import'], [null], ['退出登录', 'logout'], ['退出', 'exit']]],
     ['操作', [['撤销上一条', 'undo'], ['抽卡记录…', 'history']]],
@@ -133,10 +144,17 @@ function renderMain() {
     <small>${escapeHtml(s.hotkeys[`hotkey_${rarity}x`] ? `快捷键 ${s.hotkeys[`hotkey_${rarity}x`]}` : '')}</small></button>`
   ).join('');
   appElement.innerHTML = `<div class="menu-bar">${menuHtml}
-    <div class="captain-profile" title="${escapeHtml(captainText)}">
-      <span class="captain-label">机长</span>
-      <span class="captain-details"><span class="captain-title">${escapeHtml(captainTitle)}</span>
-        ${captainNickname ? `<span class="captain-nickname">${escapeHtml(captainNickname)}</span>` : ''}</span>
+    <div class="header-profiles">
+      <div class="flight-profile" title="${escapeHtml(currentFlight)}">
+        <span class="flight-label">当前航班</span>
+        <span class="flight-details"><span class="flight-title">${escapeHtml(flightEventName)}</span>
+          ${hasCurrentFlight ? `<span class="flight-pool">${escapeHtml(poolName)}</span>` : ''}</span>
+      </div>
+      <div class="captain-profile" title="${escapeHtml(captainText)}">
+        <span class="captain-label">机长</span>
+        <span class="captain-details"><span class="captain-title">${escapeHtml(captainTitle)}</span>
+          ${captainNickname ? `<span class="captain-nickname">${escapeHtml(captainNickname)}</span>` : ''}</span>
+      </div>
     </div></div>
     <div class="main-layout"><aside class="sidebar panel"><h2>乘客列表</h2>
       <div class="passenger-list">${passengers}</div></aside>
@@ -325,7 +343,7 @@ function renderSettings() {
     const eventName = document.getElementById('setting-event_name').value.trim();
     const poolName = document.getElementById('setting-pool_name').value.trim();
     document.getElementById('event-preview').textContent =
-      `完整活动名称预览：${eventName && poolName ? `${eventName} ${poolName}` : '—'}\n${data.pool_message || ''}`;
+      `完整活动名称预览：${formatEventNamePreview(eventName, poolName)}\n${data.pool_message || ''}`;
   };
   document.getElementById('setting-event_name').oninput = updatePreview;
   document.getElementById('setting-pool_name').onchange = updatePreview;

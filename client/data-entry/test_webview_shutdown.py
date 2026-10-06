@@ -303,6 +303,7 @@ class WebViewShutdownTests(unittest.TestCase):
         gate = Mock()
         app = module.WebViewApp.__new__(module.WebViewApp)
         app.windows = {"gate": gate, "main": Mock()}
+        app.gate_lock = threading.RLock()
         app.closed = False
         app.startup_complete = True
         app.close = Mock()

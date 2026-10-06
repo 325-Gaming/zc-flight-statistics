@@ -57,10 +57,14 @@ input[type="checkbox"] { min-height: auto; accent-color: var(--client-accent-bac
   border-radius: 6px;
 }
 .menu-bar { display: flex; flex: 0 0 auto; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--client-border); }
-.captain-profile { display: flex; align-items: center; align-self: center; gap: 8px; min-width: 0; margin-left: auto; text-align: right; }
-.captain-label { flex: none; font-size: 1.325rem; line-height: 1; }
-.captain-details { min-width: 0; }
-.captain-title, .captain-nickname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-profiles { display: flex; align-items: center; gap: 1rem; min-width: 0; margin-left: auto; }
+.flight-profile, .captain-profile { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.flight-label, .captain-label { flex: none; font-size: 1.325rem; line-height: 1; }
+.flight-details, .captain-details { min-width: 0; }
+.captain-details { text-align: right; }
+.flight-title, .flight-pool, .captain-title, .captain-nickname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flight-title { text-align: left; }
+.flight-pool { padding: 0 0 0 2rem; text-align: right; }
 .captain-nickname { padding-right: 1rem; }
 .menu-wrap { position: relative; }
 .menu-trigger { min-width: 56px; }

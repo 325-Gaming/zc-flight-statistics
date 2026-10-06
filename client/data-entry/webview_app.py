@@ -157,6 +157,8 @@ class WebViewApp:
         self.predict_lock = threading.Lock()
         self.windows = {}
         self.closed = False
+        self.close_started = False
+        self.close_finished = False
         self.logged_out = False
         self.relogin_requested = False
         self.settings_open = False
@@ -209,6 +211,8 @@ class WebViewApp:
                 "nickname": self.nickname,
                 "gacha_index": self.gacha_index,
                 "event": self.full_event_name,
+                "event_name": core.event_name,
+                "pool_name": core.pool_name,
                 "result": self.result,
                 "status": self.status,
                 "captain": self.captain_profile,
@@ -514,9 +518,12 @@ class WebViewApp:
             print(f"更新准备失败：{message}", file=sys.stderr)
 
     def _window_closed(self, view, window):
-        if self.windows.get(view) is not window:
-            return
-        del self.windows[view]
+        with self.gate_lock:
+            if self.windows.get(view) is not window:
+                return
+            del self.windows[view]
+            if view == "main" or (view == "gate" and not self.startup_complete):
+                self.closed = True
         if view == "settings":
             self.settings_open = False
             self.start_hotkeys()
@@ -525,18 +532,45 @@ class WebViewApp:
 
     def close(self):
         with self.gate_lock:
-            if self.closed:
-                return
             self.closed = True
+            if getattr(self, "close_started", False):
+                return
+            self.close_started = True
+            windows = list(self.windows.values())
+            self.windows.clear()
         self.upload_queue.close(wait=False)
-        for window in list(self.windows.values()):
+        for window in windows:
             try:
                 window.destroy()
-            except Exception:
-                pass
+            except Exception as error:
+                print(f"退出时关闭窗口失败：{error}", file=sys.stderr)
+
+    def _request_gate_close(self):
+        with self.gate_lock:
+            if self.closed:
+                return
+            # Stop background results immediately, but leave time for the bridge
+            # response before destroying WKWebView. This is not a delivery ACK.
+            self.closed = True
+            timer = threading.Timer(0.2, self.close)
+            timer.daemon = True
+            timer.start()
+
+    def _destroy_entered_gate(self, window):
+        with self.gate_lock:
+            if self.closed or self.windows.get("gate") is not window:
+                return
+            del self.windows["gate"]
+        try:
+            window.destroy()
+        except Exception as error:
+            print(f"进入客户端后关闭门禁窗口失败：{error}", file=sys.stderr)
 
     def finish_close(self):
         self.close()
+        with self.gate_lock:
+            if getattr(self, "close_finished", False):
+                return
         self._stop_hotkeys()
         drained = self.upload_queue.close(wait=True, timeout=5)
         if not drained:
@@ -544,6 +578,8 @@ class WebViewApp:
         core.capture.sct.close()
         if drained:
             core.client.close()
+        with self.gate_lock:
+            self.close_finished = True
 
     def _load_style(self):
         try:
@@ -735,8 +771,10 @@ class WebViewApp:
                 self._begin_startup_check()
                 return {"started": True}
             if name == "exit":
-                self.close()
+                self._request_gate_close()
                 return {"closing": True}
+            if self.closed:
+                raise ValueError("启动门禁已关闭")
             if name in {"continue", "enter"}:
                 with self.gate_lock:
                     phase = self.gate_state.get("phase")
@@ -748,6 +786,8 @@ class WebViewApp:
                 return self._enter_client()
             if name == "install":
                 with self.gate_lock:
+                    if self.closed:
+                        raise ValueError("启动门禁已关闭")
                     phase = self.gate_state.get("phase")
                     if phase not in {"required", "optional"} or not self.update_offer:
                         raise ValueError("当前没有可验证的更新目标")
@@ -766,11 +806,7 @@ class WebViewApp:
                 with self.gate_lock:
                     if self.gate_state.get("phase") != "restarting":
                         raise ValueError("更新尚未准备完成")
-                window = self.windows.get("gate")
-                if window is not None:
-                    timer = threading.Timer(0.2, window.destroy)
-                    timer.daemon = True
-                    timer.start()
+                self._request_gate_close()
                 return {"closing": True}
             raise ValueError("不支持的门禁操作")
         if not getattr(self, "startup_complete", True):
@@ -1019,7 +1055,7 @@ class WebViewApp:
 
             gate_window = self.windows.get("gate")
             if gate_window is not None:
-                timer = threading.Timer(0.3, gate_window.destroy)
+                timer = threading.Timer(0.3, lambda: self._destroy_entered_gate(gate_window))
                 timer.daemon = True
                 timer.start()
             return {"entered": True}
@@ -1034,6 +1070,9 @@ class WebViewApp:
                     main_window = self.windows.pop("main", None)
                 elif self.windows.get("main") is main_window:
                     del self.windows["main"]
+                else:
+                    # close() already claimed this window for destruction.
+                    main_window = None
                 if not self.closed:
                     self.gate_state = {
                         "phase": "error",
