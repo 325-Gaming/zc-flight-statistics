@@ -159,8 +159,8 @@ function renderMain() {
     <div class="main-layout"><aside class="sidebar panel"><h2>乘客列表</h2>
       <div class="passenger-list">${passengers}</div></aside>
     <main class="main-panel"><div class="result">${escapeHtml(s.result)}</div>
-      <div class="navigation"><button id="previous" ${s.user_id === 0 ? 'disabled' : ''}>上一位乘客</button>
-      <button id="insert">新乘客</button><button id="next">下一位乘客</button></div>
+      <div class="navigation"><button id="previous" ${s.user_id === 0 ? 'disabled' : ''}>上一位乘客${s.hotkeys.hotkey_previous_user ? `<br><small>${escapeHtml(s.hotkeys.hotkey_previous_user)}</small>` : ''}</button>
+      <button id="insert">新乘客</button><button id="next">下一位乘客${s.hotkeys.hotkey_next_user ? `<br><small>${escapeHtml(s.hotkeys.hotkey_next_user)}</small>` : ''}</button></div>
       <label for="nickname">当前乘客：</label>
       <div class="nickname-row"><input id="nickname" value="${escapeHtml(s.nickname)}"><button id="rename">重命名</button></div>
       <fieldset class="panel"><legend>单抽</legend><div class="action-row">${single}</div></fieldset>
@@ -330,8 +330,8 @@ function renderSettings() {
     '<p class="wide muted" id="event-preview"></p>',
     '<div class="wide form-separator" role="separator"></div>',
     settingsField('target_monitor_id', '截图显示器编号', '执行识别时需要截取的显示器编号。', `<div class="inline"><select id="setting-target_monitor_id">${monitorOptions}</select><button id="monitors-refresh">刷新列表</button><button id="monitors-preview">显示预览</button></div>`),
-    ...['hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x'].map((key, index) =>
-      settingsField(key, ['十连快捷键', '三星快捷键', '四星快捷键', '五星快捷键', '六星快捷键'][index],
+    ...['hotkey_previous_user', 'hotkey_next_user', 'hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x'].map((key, index) =>
+      settingsField(key, ['上一位乘客快捷键', '下一位乘客快捷键', '十连快捷键', '三星快捷键', '四星快捷键', '五星快捷键', '六星快捷键'][index],
         '可留空；设置窗口打开期间，全局快捷键无效。',
         `<div class="inline">${textInput(key, config[key] || '')}<button data-clear="${key}">移除</button></div>`)),
   ];
@@ -370,7 +370,7 @@ function renderSettings() {
   document.getElementById('settings-save').onclick = async () => {
     const values = {};
     for (const key of ['event_name', 'pool_name', 'target_monitor_id', 'user_name_list_file',
-      'hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x']) {
+      'hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x', 'hotkey_previous_user', 'hotkey_next_user']) {
       values[key] = document.getElementById(`setting-${key}`).value.trim();
     }
     if (values.user_name_list_file !== config.user_name_list_file &&

@@ -71,6 +71,7 @@ WINDOWS = {
 }
 HOTKEY_KEYS = (
     "hotkey_gacha10", "hotkey_3x", "hotkey_4x", "hotkey_5x", "hotkey_6x",
+    "hotkey_previous_user", "hotkey_next_user",
 )
 
 
@@ -320,6 +321,8 @@ class WebViewApp:
             (hotkeys["hotkey_4x"], lambda: self.enqueue_gacha_result(1, ["四星干员"])),
             (hotkeys["hotkey_5x"], lambda: self.enqueue_gacha_result(1, ["五星干员"])),
             (hotkeys["hotkey_6x"], lambda: self.enqueue_gacha_result(1, ["六星干员"])),
+            (hotkeys["hotkey_previous_user"], lambda: self.action("main", "previous", {})),
+            (hotkeys["hotkey_next_user"], lambda: self.action("main", "next", {})),
         )
         active = [(hotkey, callback) for hotkey, callback in bindings if hotkey]
         if len({hotkey for hotkey, _callback in active}) != len(active):
@@ -629,6 +632,8 @@ class WebViewApp:
     def _settings_state(self):
         with core.CONFIG_PATH.open(encoding="utf-8") as config_file:
             config = json.load(config_file)
+        for key in ("hotkey_previous_user", "hotkey_next_user"):
+            config.setdefault(key, getattr(core, key))
         pool = get_page_pool_settings(
             core.client, core.get_pool_list_api_url, core.login_token,
         )

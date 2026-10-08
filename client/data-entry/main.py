@@ -103,6 +103,8 @@ hotkey_3x = config['hotkey_3x']
 hotkey_4x = config['hotkey_4x']
 hotkey_5x = config['hotkey_5x']
 hotkey_6x = config['hotkey_6x']
+hotkey_previous_user = config.setdefault('hotkey_previous_user', 'Q')
+hotkey_next_user = config.setdefault('hotkey_next_user', 'E')
 
 passenger_list_path = BASE_DIR / user_name_list_file
 if user_name_list_file == 'name.csv' and not passenger_list_path.exists():
@@ -1821,15 +1823,17 @@ class SimpleApp:
                 "",
             ),
             (
-                "target_monitor_id",
-                "截图显示器编号",
-                "执行识别时需要截取的显示器编号。",
-            ),
-            (
                 "user_name_list_file",
                 "乘客名单文件",
                 "程序启动时读取的乘客名单文件，相对于程序目录。",
             ),
+            (
+                "target_monitor_id",
+                "截图显示器编号",
+                "执行识别时需要截取的显示器编号。",
+            ),
+            ("hotkey_previous_user", "上一位乘客快捷键", "切换到上一位乘客，可留空。"),
+            ("hotkey_next_user", "下一位乘客快捷键", "切换到下一位乘客，可留空。"),
             ("hotkey_gacha10", "十连快捷键", "触发十连截图和识别，可留空。"),
             ("hotkey_3x", "三星快捷键", "提交一次三星单抽记录，可留空。"),
             ("hotkey_4x", "四星快捷键", "提交一次四星单抽记录，可留空。"),
@@ -1906,7 +1910,7 @@ class SimpleApp:
                 hotkey_row.columnconfigure(0, weight=1)
                 entry = ttk.Entry(hotkey_row)
                 entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-                entry.insert(0, str(current_config.get(key, "")))
+                entry.insert(0, str(current_config.get(key, config.get(key, ""))))
                 ttk.Button(
                     hotkey_row,
                     text="移除",
@@ -2002,6 +2006,8 @@ class SimpleApp:
                     "hotkey_4x": hotkey_4x,
                     "hotkey_5x": hotkey_5x,
                     "hotkey_6x": hotkey_6x,
+                    "hotkey_previous_user": hotkey_previous_user,
+                    "hotkey_next_user": hotkey_next_user,
                 }
             )
         self.settings_window = None
@@ -2073,6 +2079,8 @@ class SimpleApp:
         global hotkey_4x
         global hotkey_5x
         global hotkey_6x
+        global hotkey_previous_user
+        global hotkey_next_user
         global hotkey_gacha10
         global pool_name
         global target_monitor_id
@@ -2118,6 +2126,8 @@ class SimpleApp:
             "hotkey_4x",
             "hotkey_5x",
             "hotkey_6x",
+            "hotkey_previous_user",
+            "hotkey_next_user",
         )
         new_hotkeys = {key: values[key] for key in hotkey_keys}
         active_hotkeys = [hotkey for hotkey in new_hotkeys.values() if hotkey]
@@ -2226,6 +2236,8 @@ class SimpleApp:
         hotkey_4x = new_hotkeys["hotkey_4x"]
         hotkey_5x = new_hotkeys["hotkey_5x"]
         hotkey_6x = new_hotkeys["hotkey_6x"]
+        hotkey_previous_user = new_hotkeys["hotkey_previous_user"]
+        hotkey_next_user = new_hotkeys["hotkey_next_user"]
         config.clear()
         config.update(updated_config)
         self.event_name = event_name
@@ -2248,6 +2260,8 @@ class SimpleApp:
             (hotkeys["hotkey_4x"], gacha_4x),
             (hotkeys["hotkey_5x"], gacha_5x),
             (hotkeys["hotkey_6x"], gacha_6x),
+            (hotkeys["hotkey_previous_user"], self.previous_user),
+            (hotkeys["hotkey_next_user"], self.new_user),
         )
         active_bindings = [
             (hotkey, callback)
@@ -2278,6 +2292,12 @@ class SimpleApp:
         self.button_5.set_shortcut(hotkeys["hotkey_5x"])
         self.button_6.set_shortcut(hotkeys["hotkey_6x"])
         self.button_10.set_shortcut(hotkeys["hotkey_gacha10"])
+        self.button_previous_user.configure(text=self.passenger_button_text("上一位乘客", hotkeys["hotkey_previous_user"]))
+        self.button_new_user.configure(text=self.passenger_button_text("下一位乘客", hotkeys["hotkey_next_user"]))
+
+    @staticmethod
+    def passenger_button_text(label, shortcut):
+        return f"{label}\n{shortcut}" if shortcut else label
 
     def _create_main_panel(self):
         main = ttk.Frame(self.root, padding=(20, 16, 20, 20))
@@ -2291,7 +2311,7 @@ class SimpleApp:
         navigation.grid(row=1, column=0, sticky="ew", pady=(0, 16))
         navigation.columnconfigure((0, 1, 2), weight=1, uniform="navigation")
         self.button_previous_user = ttk.Button(
-            navigation, text="上一位乘客", command=self.previous_user
+            navigation, text=self.passenger_button_text("上一位乘客", hotkey_previous_user), command=self.previous_user
         )
         self.button_previous_user.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.button_insert_user = ttk.Button(
@@ -2299,7 +2319,7 @@ class SimpleApp:
         )
         self.button_insert_user.grid(row=0, column=1, sticky="ew", padx=6)
         self.button_new_user = ttk.Button(
-            navigation, text="下一位乘客", command=self.new_user
+            navigation, text=self.passenger_button_text("下一位乘客", hotkey_next_user), command=self.new_user
         )
         self.button_new_user.grid(row=0, column=2, sticky="ew", padx=(6, 0))
 
@@ -2656,6 +2676,8 @@ if __name__ == "__main__":
                 "hotkey_4x": hotkey_4x,
                 "hotkey_5x": hotkey_5x,
                 "hotkey_6x": hotkey_6x,
+                "hotkey_previous_user": hotkey_previous_user,
+                "hotkey_next_user": hotkey_next_user,
             }
         )
     except (RuntimeError, ValueError) as error:
@@ -2669,6 +2691,8 @@ if __name__ == "__main__":
             ("单抽四星", hotkey_4x),
             ("单抽五星", hotkey_5x),
             ("单抽六星", hotkey_6x),
+            ("上一位乘客", hotkey_previous_user),
+            ("下一位乘客", hotkey_next_user),
         )
         for hotkey_name, hotkey in configured_hotkeys:
             if hotkey:

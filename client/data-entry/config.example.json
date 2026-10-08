@@ -7,5 +7,7 @@
     "hotkey_3x": "3",
     "hotkey_4x": "4",
     "hotkey_5x": "5",
-    "hotkey_6x": "6"
+    "hotkey_6x": "6",
+    "hotkey_previous_user": "Q",
+    "hotkey_next_user": "E"
 }
