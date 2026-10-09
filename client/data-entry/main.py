@@ -24,7 +24,8 @@ from gacha_upload import (
     GachaUploadTask,
 )
 from model_updater import ensure_latest_models
-from utils import expand_to_square, process_to_16_9
+from result_overlay import result_overlay
+from utils import expand_to_square, gacha10_horizontal_bounds, process_to_16_9
 from version import __version__
 
 import tkinter as tk
@@ -216,7 +217,7 @@ class MultiMonitorCapture:
             os.makedirs(save_dir, exist_ok=True)
 
         # 快捷键回调可能运行在后台线程，每次截图创建独立会话更安全。
-        with mss.mss() as sct:
+        with result_overlay.hidden_for_capture(), mss.mss() as sct:
             screenshot = sct.grab(self.monitors[monitor_id])
         img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
@@ -240,6 +241,10 @@ class MultiMonitorCapture:
             self.sct.close()
 
 capture = MultiMonitorCapture()
+result_overlay.configure(
+    config.get('show_result_overlay', sys.platform == 'win32') is True,
+    capture.monitors[target_monitor_id],
+)
 
 
 def seperate_image_gacha10(image):
@@ -247,7 +252,8 @@ def seperate_image_gacha10(image):
     img_w, img_h = image.size
     # image_square = expand_to_square(image, (255, 255, 255))
     # x1, y1, x2, y2
-    gacha_area = (int(img_w * (42 / 1920)), int(img_h * 0.2), int(img_w * ((1920 - 42) / 1920)), int(img_h * 0.8))
+    area_left, area_right = gacha10_horizontal_bounds(img_w)
+    gacha_area = (area_left, int(img_h * 0.2), area_right, int(img_h * 0.8))
     gacha_splits = [(gacha_area[2] - gacha_area[0]) / 20 * (i * 2 + 1) for i in range(10)]
     crop_width = int(img_w * 180 / 1920)
     crop_height = crop_width * 2
@@ -366,6 +372,8 @@ def single_gacha(x):
 
 
 def capture_and_predict():
+    result_overlay.show_result([""] * 10)
+    app.show_result("")
     t0 = time.time()
     image_origin = capture.capture_monitor(target_monitor_id, is_save=False)
     image_16_9 = process_to_16_9(image_origin)
@@ -413,6 +421,7 @@ def capture_and_predict():
         with open(BASE_DIR / 'output.txt', 'w', encoding='utf-8') as f:
             f.write(' '.join(result))
         text = ' '.join(result)
+        result_overlay.show_result(result)
         app.show_result(text)
         app.enqueue_gacha_result(
             count=10,
@@ -1832,6 +1841,7 @@ class SimpleApp:
                 "截图显示器编号",
                 "执行识别时需要截取的显示器编号。",
             ),
+            ("show_result_overlay", "识别结果悬浮窗口", "在截图屏幕下方显示结果，整体点击穿透（Windows）。"),
             ("hotkey_previous_user", "上一位乘客快捷键", "切换到上一位乘客，可留空。"),
             ("hotkey_next_user", "下一位乘客快捷键", "切换到下一位乘客，可留空。"),
             ("hotkey_gacha10", "十连快捷键", "触发十连截图和识别，可留空。"),
@@ -1904,6 +1914,10 @@ class SimpleApp:
                     ),
                 ).grid(row=0, column=2, padx=(6, 0))
                 entries[key] = monitor_selector
+            elif key == "show_result_overlay":
+                variable = tk.BooleanVar(master=window, value=current_config.get(key, sys.platform == "win32"))
+                ttk.Checkbutton(content, text="显示", variable=variable).grid(row=row, column=1, sticky="w")
+                entries[key] = variable
             elif key.startswith("hotkey_"):
                 hotkey_row = ttk.Frame(content)
                 hotkey_row.grid(row=row, column=1, sticky="ew", pady=6)
@@ -2090,10 +2104,14 @@ class SimpleApp:
             key: (
                 self.get_selected_monitor_id(entry)
                 if key == "target_monitor_id"
+                else entry.get() if key == "show_result_overlay"
                 else entry.get().strip()
             )
             for key, entry in entries.items()
         }
+        if values["show_result_overlay"] and sys.platform != "win32":
+            messagebox.showwarning("无法保存", "识别结果悬浮窗口目前仅支持 Windows", parent=window)
+            return
         required_keys = (
             "event_name",
             "pool_name",
@@ -2230,6 +2248,7 @@ class SimpleApp:
         event_name = values["event_name"]
         pool_name = values["pool_name"]
         target_monitor_id = values["target_monitor_id"]
+        result_overlay.configure(values["show_result_overlay"], capture.monitors[target_monitor_id])
         user_name_list_file = values["user_name_list_file"]
         hotkey_gacha10 = new_hotkeys["hotkey_gacha10"]
         hotkey_3x = new_hotkeys["hotkey_3x"]
@@ -2653,6 +2672,7 @@ class SimpleApp:
         if pending_count:
             print(f'正在等待 {pending_count} 个上传任务完成...')
         self.upload_queue.close(wait=True)
+        result_overlay.close()
         capture.sct.close()
         client.close()
         self.root.destroy()

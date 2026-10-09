@@ -3,6 +3,11 @@ from typing import Tuple, Optional, Union
 
 from PIL import Image
 
+def gacha10_horizontal_bounds(image_width):
+    """Shared horizontal limits of the ten-pull recognition area."""
+    return int(image_width * (42 / 1920)), int(image_width * ((1920 - 42) / 1920))
+
+
 def expand_to_square(pil_img, bg_color):
     width, height = pil_img.size
     if width == height:

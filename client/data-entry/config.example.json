@@ -2,6 +2,7 @@
     "event_name": "Zc航空",
     "pool_name": "测试卡池",
     "target_monitor_id": 1,
+    "show_result_overlay": true,
     "user_name_list_file": "name.csv",
     "hotkey_gacha10": "0",
     "hotkey_3x": "3",

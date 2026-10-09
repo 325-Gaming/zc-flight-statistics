@@ -81,7 +81,9 @@ input[type="checkbox"] { min-height: auto; accent-color: var(--client-accent-bac
 .passenger-list button:hover { background: var(--client-control-hover-background); }
 .passenger-list button.selected { background: var(--client-selection-background); color: var(--client-selection-text); }
 .main-panel { overflow: auto; min-width: 0; padding: 16px 20px 20px; }
-.result { min-height: 22px; margin-bottom: 10px; overflow-wrap: anywhere; }
+.result-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.result { flex: 1; min-width: 0; min-height: 22px; overflow-wrap: anywhere; }
+.result-row .overlay-switch { flex: 0 0 auto; white-space: nowrap; }
 .navigation { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .nickname-row { display: flex; gap: 12px; margin: 5px 0 18px; }
 .nickname-row input { flex: 1; min-width: 0; }
@@ -126,6 +128,7 @@ tbody tr.selected { background: var(--client-selection-background); color: var(-
 .form-grid { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; gap: 10px 12px; }
 .form-grid > label { font-weight: 600; }
 .form-grid input:not([type="checkbox"]), .form-grid select { width: 100%; }
+#setting-show_result_overlay { justify-self: start; margin: 0; }
 .form-grid .hint { grid-column: 2; margin: -7px 0 4px; color: var(--client-muted-text); }
 .form-grid .wide { grid-column: 1 / -1; }
 .form-separator { border-top: 1px solid var(--client-border); margin: 4px 0; }

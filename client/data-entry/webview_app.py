@@ -34,6 +34,7 @@ from flight_session import get_login_info, has_flight_permission, logout
 from gacha_history import format_gacha_position, get_gacha_history
 from gacha_upload import GachaMoveTask, GachaStateTask, GachaUploadQueue
 from hotkeys import register_hotkeys
+from result_overlay import result_overlay
 from page_display_settings import (
     PAGE_ACTIVITY_ITEM,
     PAGE_DISPLAY_ITEMS,
@@ -178,7 +179,7 @@ class WebViewApp:
         self.nickname = self.user_name_list[0]
         self.last_synced_user = None
         self.gacha_index = 1
-        self.result = ""
+        self.result = "等待识别结果……"
         self.status = ""
         self.captain_profile = None
         self.history_filter = "current"
@@ -215,6 +216,7 @@ class WebViewApp:
                 "event_name": core.event_name,
                 "pool_name": core.pool_name,
                 "result": self.result,
+                "show_result_overlay": core.config.get("show_result_overlay", sys.platform == "win32"),
                 "status": self.status,
                 "captain": self.captain_profile,
                 "hotkeys": {key: getattr(core, key) for key in HOTKEY_KEYS},
@@ -541,6 +543,7 @@ class WebViewApp:
             self.close_started = True
             windows = list(self.windows.values())
             self.windows.clear()
+        result_overlay.close()
         self.upload_queue.close(wait=False)
         for window in windows:
             try:
@@ -634,6 +637,7 @@ class WebViewApp:
             config = json.load(config_file)
         for key in ("hotkey_previous_user", "hotkey_next_user"):
             config.setdefault(key, getattr(core, key))
+        config.setdefault("show_result_overlay", sys.platform == "win32")
         pool = get_page_pool_settings(
             core.client, core.get_pool_list_api_url, core.login_token,
         )
@@ -714,6 +718,11 @@ class WebViewApp:
         monitor_id = int(values["target_monitor_id"])
         if not 0 <= monitor_id < len(core.capture.monitors):
             raise ValueError("显示器编号无效")
+        show_overlay = values.get("show_result_overlay", sys.platform == "win32")
+        if not isinstance(show_overlay, bool):
+            raise ValueError("悬浮窗口显示设置必须为布尔值")
+        if show_overlay and sys.platform != "win32":
+            raise ValueError("识别结果悬浮窗口目前仅支持 Windows")
         hotkeys = {key: str(values.get(key, "")).strip() for key in HOTKEY_KEYS}
         active_hotkeys = [item for item in hotkeys.values() if item]
         if len(set(active_hotkeys)) != len(active_hotkeys):
@@ -758,6 +767,7 @@ class WebViewApp:
         core.event_name = values["event_name"]
         core.pool_name = values["pool_name"]
         core.target_monitor_id = monitor_id
+        result_overlay.configure(show_overlay, core.capture.monitors[monitor_id])
         core.user_name_list_file = values["user_name_list_file"]
         for key, value in hotkeys.items():
             setattr(core, key, value)
@@ -829,6 +839,7 @@ class WebViewApp:
             # flight_session.logout clears the local credential even if the request fails.
             self.logged_out = True
             self._stop_hotkeys()
+            result_overlay.close()
             self.upload_queue.close(wait=False)
             return {"revoked": revoked}
         if self.logged_out and name != "close":
@@ -885,7 +896,24 @@ class WebViewApp:
             raise ValueError("不支持的操作")
 
         if view == "main":
-            if name == "select":
+            if name == "overlay":
+                enabled = payload.get("enabled")
+                if not isinstance(enabled, bool):
+                    raise ValueError("悬浮窗口显示设置必须为布尔值")
+                if enabled and sys.platform != "win32":
+                    raise ValueError("识别结果悬浮窗口目前仅支持 Windows")
+                with core.CONFIG_PATH.open(encoding="utf-8") as config_file:
+                    updated = json.load(config_file)
+                updated["show_result_overlay"] = enabled
+                temporary = core.CONFIG_PATH.with_suffix(".json.tmp")
+                with temporary.open("w", encoding="utf-8") as config_file:
+                    json.dump(updated, config_file, ensure_ascii=False, indent=4)
+                    config_file.write("\n")
+                temporary.replace(core.CONFIG_PATH)
+                core.config["show_result_overlay"] = enabled
+                result_overlay.configure(enabled, core.capture.monitors[core.target_monitor_id])
+                self._emit_main()
+            elif name == "select":
                 index = int(payload["index"])
                 if not 0 <= index < len(self.user_name_list):
                     raise ValueError("乘客编号无效")

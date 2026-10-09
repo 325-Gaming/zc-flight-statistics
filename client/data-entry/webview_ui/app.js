@@ -158,7 +158,8 @@ function renderMain() {
     </div></div>
     <div class="main-layout"><aside class="sidebar panel"><h2>乘客列表</h2>
       <div class="passenger-list">${passengers}</div></aside>
-    <main class="main-panel"><div class="result">${escapeHtml(s.result)}</div>
+    <main class="main-panel"><div class="result-row"><div class="result">${escapeHtml(s.result)}</div>
+      <label class="check-row overlay-switch">悬浮窗口 <input id="main-overlay" type="checkbox" ${s.show_result_overlay ? 'checked' : ''}></label></div>
       <div class="navigation"><button id="previous" ${s.user_id === 0 ? 'disabled' : ''}>上一位乘客${s.hotkeys.hotkey_previous_user ? `<br><small>${escapeHtml(s.hotkeys.hotkey_previous_user)}</small>` : ''}</button>
       <button id="insert">新乘客</button><button id="next">下一位乘客${s.hotkeys.hotkey_next_user ? `<br><small>${escapeHtml(s.hotkeys.hotkey_next_user)}</small>` : ''}</button></div>
       <label for="nickname">当前乘客：</label>
@@ -169,6 +170,16 @@ function renderMain() {
         <button class="gacha-button wide" id="ten"><strong>十连</strong>
         <small>${escapeHtml(s.hotkeys.hotkey_gacha10 ? `快捷键 ${s.hotkeys.hotkey_gacha10}` : '')}</small></button>
       </div></fieldset><p class="status" role="status">${escapeHtml(s.status)}</p></main></div>`;
+  document.getElementById('main-overlay').onchange = async event => {
+    const checkbox = event.target;
+    checkbox.disabled = true;
+    try {
+      const data = await api('overlay', {enabled: checkbox.checked});
+      if (!data?.failed) state = data;
+    } finally {
+      renderMain();
+    }
+  };
   appElement.querySelectorAll('[data-menu]').forEach(button => button.onclick = event => {
     event.stopPropagation();
     const index = button.dataset.menu;
@@ -330,6 +341,7 @@ function renderSettings() {
     '<p class="wide muted" id="event-preview"></p>',
     '<div class="wide form-separator" role="separator"></div>',
     settingsField('target_monitor_id', '截图显示器编号', '执行识别时需要截取的显示器编号。', `<div class="inline"><select id="setting-target_monitor_id">${monitorOptions}</select><button id="monitors-refresh">刷新列表</button><button id="monitors-preview">显示预览</button></div>`),
+    settingsField('show_result_overlay', '识别结果悬浮窗口', '显示在截图屏幕的十连识别区域下方，整体点击穿透（Windows）。', `<input type="checkbox" id="setting-show_result_overlay" ${config.show_result_overlay === true ? 'checked' : ''}>`),
     ...['hotkey_previous_user', 'hotkey_next_user', 'hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x'].map((key, index) =>
       settingsField(key, ['上一位乘客快捷键', '下一位乘客快捷键', '十连快捷键', '三星快捷键', '四星快捷键', '五星快捷键', '六星快捷键'][index],
         '可留空；设置窗口打开期间，全局快捷键无效。',
@@ -368,7 +380,7 @@ function renderSettings() {
   });
   document.getElementById('settings-cancel').onclick = () => api('close');
   document.getElementById('settings-save').onclick = async () => {
-    const values = {};
+    const values = {show_result_overlay: document.getElementById('setting-show_result_overlay').checked};
     for (const key of ['event_name', 'pool_name', 'target_monitor_id', 'user_name_list_file',
       'hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x', 'hotkey_previous_user', 'hotkey_next_user']) {
       values[key] = document.getElementById(`setting-${key}`).value.trim();
