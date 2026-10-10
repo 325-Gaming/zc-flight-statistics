@@ -66,6 +66,7 @@ input[type="checkbox"] { min-height: auto; accent-color: var(--client-accent-bac
 .flight-title { text-align: left; }
 .flight-pool { padding: 0 0 0 2rem; text-align: right; }
 .captain-nickname { padding-right: 1rem; }
+.on-air-button { flex: none; min-width: 76px; font-weight: 700; letter-spacing: .04em; }
 .menu-wrap { position: relative; }
 .menu-trigger { min-width: 56px; }
 .menu-popover { position: absolute; top: calc(100% + 2px); left: 0; z-index: 10; min-width: 200px; padding: 4px; box-shadow: 0 6px 16px color-mix(in srgb, var(--client-text) 25%, transparent); }

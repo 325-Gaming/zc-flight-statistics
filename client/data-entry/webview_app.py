@@ -189,6 +189,7 @@ class WebViewApp:
         self.history_status = ""
         self.preview_image = ""
         self.page_style = DEFAULT_PAGE_STYLE
+        self.page_is_active = False
         self.available_styles = (DEFAULT_PAGE_STYLE,)
         self.upload_queue = GachaUploadQueue(
             core.client, core.submit_gacha_log_api_url, core.login_token,
@@ -217,6 +218,7 @@ class WebViewApp:
                 "pool_name": core.pool_name,
                 "result": self.result,
                 "show_result_overlay": core.config.get("show_result_overlay", sys.platform == "win32"),
+                "page_is_active": self.page_is_active,
                 "status": self.status,
                 "captain": self.captain_profile,
                 "hotkeys": {key: getattr(core, key) for key in HOTKEY_KEYS},
@@ -592,6 +594,12 @@ class WebViewApp:
             settings = get_page_display_settings(
                 core.client, core.get_page_display_api_url, core.login_token,
             )
+        except (httpx.HTTPError, ValueError):
+            self.page_style = DEFAULT_PAGE_STYLE
+            self.page_is_active = False
+            return
+        self.page_is_active = settings["is_active"]
+        try:
             styles = get_available_page_style_list(
                 core.client, core.get_page_style_list_api_url,
             )
@@ -913,6 +921,20 @@ class WebViewApp:
                 core.config["show_result_overlay"] = enabled
                 result_overlay.configure(enabled, core.capture.monitors[core.target_monitor_id])
                 self._emit_main()
+            elif name == "on_air":
+                enabled = payload.get("enabled")
+                if not isinstance(enabled, bool):
+                    raise ValueError("直播页面活跃刷新设置必须为布尔值")
+                settings = get_page_display_settings(
+                    core.client, core.get_page_display_api_url, core.login_token,
+                )
+                settings["is_active"] = enabled
+                settings = set_page_display_settings(
+                    core.client, core.set_page_display_api_url,
+                    core.login_token, settings,
+                )
+                self.page_is_active = settings["is_active"]
+                self._emit_main()
             elif name == "select":
                 index = int(payload["index"])
                 if not 0 <= index < len(self.user_name_list):
@@ -1056,8 +1078,10 @@ class WebViewApp:
                 core.login_token, payload,
             )
             self.page_style = settings["page_style"]
+            self.page_is_active = settings["is_active"]
             for target in list(self.windows):
                 self._emit(target, {"theme": self.page_style})
+            self._emit_main()
             return settings
         raise ValueError("不支持的操作")
 

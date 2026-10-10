@@ -155,6 +155,9 @@ function renderMain() {
         <span class="captain-details"><span class="captain-title">${escapeHtml(captainTitle)}</span>
           ${captainNickname ? `<span class="captain-nickname">${escapeHtml(captainNickname)}</span>` : ''}</span>
       </div>
+      <button id="on-air" class="on-air-button${s.page_is_active ? ' danger' : ''}"
+        aria-pressed="${s.page_is_active ? 'true' : 'false'}"
+        title="${s.page_is_active ? '关闭直播页面活跃刷新' : '开启直播页面活跃刷新'}">ON AIR</button>
     </div></div>
     <div class="main-layout"><aside class="sidebar panel"><h2>乘客列表</h2>
       <div class="passenger-list">${passengers}</div></aside>
@@ -175,6 +178,16 @@ function renderMain() {
     checkbox.disabled = true;
     try {
       const data = await api('overlay', {enabled: checkbox.checked});
+      if (!data?.failed) state = data;
+    } finally {
+      renderMain();
+    }
+  };
+  document.getElementById('on-air').onclick = async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const data = await api('on_air', {enabled: !s.page_is_active});
       if (!data?.failed) state = data;
     } finally {
       renderMain();
