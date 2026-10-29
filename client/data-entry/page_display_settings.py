@@ -58,21 +58,32 @@ def _normalize_settings(data):
     return settings
 
 
-def get_page_display_settings(http_client, url, login_token):
+def get_page_display_settings(http_client, url, login_token, *, live_id=""):
     response = http_client.get(
         url,
         headers=_authorization_headers(login_token),
+        **({"params": {"live_id": live_id}} if live_id else {}),
     )
     response.raise_for_status()
-    return _normalize_settings(response.json())
+    data = response.json()
+    settings = _normalize_settings(data)
+    if "live_id" in data:
+        if not isinstance(data["live_id"], str):
+            raise ValueError("服务器返回的直播配置 ID 无效")
+        settings["live_id"] = data["live_id"]
+    return settings
 
 
-def set_page_display_settings(http_client, url, login_token, settings):
+def set_page_display_settings(http_client, url, login_token, settings, *, live_id=""):
     payload = _normalize_settings(settings)
+    params = {"live_id": live_id} if live_id else {}
+    if "live_id" in settings:
+        params["expected_live_id"] = settings["live_id"]
     response = http_client.post(
         url,
         headers=_authorization_headers(login_token),
         json=payload,
+        **({"params": params} if params else {}),
     )
     response.raise_for_status()
     return _normalize_settings(response.json())

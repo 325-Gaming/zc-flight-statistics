@@ -337,6 +337,7 @@ def request_set_current_user(nickname):
             headers=auth_headers(login_token),
             json={
                 "nickname": nickname,
+                "event_name": compose_event_name(event_name, pool_name),
             },
         )
         res.raise_for_status()

@@ -31,9 +31,11 @@ class BuildDataEntryReleaseTests(unittest.TestCase):
 
     def test_release_zip_contains_local_gate_styles_and_fonts(self):
         root = builder.REPOSITORY_ROOT
+        version_source = (root / "client/data-entry/version.py").read_bytes()
+        version = builder.version_from_source(version_source.decode("utf-8"))
         asset_paths = sorted(builder.REQUIRED_WEBVIEW_ASSETS)
         files = {
-            "version.py": b'__version__ = "2.3.0"\n',
+            "version.py": version_source,
             **{
                 name: (root / "client/data-entry" / name).read_bytes()
                 for name in asset_paths
@@ -59,9 +61,9 @@ class BuildDataEntryReleaseTests(unittest.TestCase):
             raise AssertionError(f"Unexpected git command: {arguments}")
 
         with tempfile.TemporaryDirectory() as directory:
-            archive_path = pathlib.Path(directory) / "data-entry-v2.3.0.zip"
+            archive_path = pathlib.Path(directory) / f"data-entry-v{version}.zip"
             with patch.object(builder, "git", side_effect=fake_git):
-                builder.build("data-entry/v2.3.0", archive_path)
+                builder.build(f"data-entry/v{version}", archive_path)
             with zipfile.ZipFile(archive_path) as archive:
                 packaged = set(archive.namelist())
                 manifest = json.loads(archive.read("release-manifest.json"))

@@ -412,7 +412,7 @@ function renderPage() {
     <input type="checkbox" id="page-${key}" ${s[key] ? 'checked' : ''}>${escapeHtml(label)}</label>`;
   const fields = data.text_items.map(([key, label]) =>
     `<label for="page-${key}">${escapeHtml(label)}</label><input id="page-${key}" value="${escapeHtml(s[key])}">`).join('');
-  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
+  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><p class="muted">正在编辑：${escapeHtml(data.live_id || '默认活动')}</p><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
     ${escapeHtml(data.activity[1])}</label><div class="form-grid">
     <label for="page-poll_interval_seconds">数据轮询间隔（秒）</label>
     <input type="number" id="page-poll_interval_seconds" min="1" max="60" value="${s.poll_interval_seconds}">
@@ -434,7 +434,7 @@ function renderPage() {
       await showDialog('无法保存', '数据轮询间隔必须是 1 到 60 之间的整数。');
       return;
     }
-    const values = {poll_interval_seconds: seconds,
+    const values = {poll_interval_seconds: seconds, live_id: s.live_id,
       page_style: document.getElementById('page-page_style').value};
     for (const [key] of [data.activity, ...data.display_items]) {
       values[key] = document.getElementById(`page-${key}`).checked;
@@ -445,18 +445,104 @@ function renderPage() {
   };
 }
 
-function renderStatistics() {
-  appElement.innerHTML = `<div class="content"><div class="url-row"><input id="statistics-url" readonly value="${escapeHtml(state.url)}">
-    <button id="copy-url">点击复制</button></div><p class="muted">在 OBS 添加浏览器源，URL 填写上方 URL，宽度与高度设为与画布相同（1920×1080 / 2560×1440）。</p></div>`;
-  document.getElementById('copy-url').onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(state.url);
-    } catch (_error) {
-      const input = document.getElementById('statistics-url');
-      input.select();
-      document.execCommand('copy');
+function renderStatistics(previewLiveId = state.live_id) {
+  const data = state;
+  const options = data.live_list.map(row => `<option value="${escapeHtml(row.live_id)}">${escapeHtml(row.name)}${row.is_enabled ? '' : '（已停用）'}</option>`).join('');
+  appElement.innerHTML = `<div class="content">
+    <div class="form-grid"><label for="statistics-live-id">直播配置</label>
+    <select id="statistics-live-id"><option value="">默认活动（随服务端切换）</option>${options}</select></div>
+    <div class="url-row"><input id="statistics-url" aria-label="直播页面 URL" readonly><button id="copy-url">点击复制</button></div>
+    <p class="muted">将链接填入 OBS 浏览器源，尺寸与画布相同（1920×1080 / 2560×1440）。显示内容随服务端实时更新。</p>
+    <div class="actions"><button id="live-refresh">刷新列表</button><button id="live-use" class="primary">用于本客户端</button>${data.is_admin ? '<button id="live-default">设为默认活动</button>' : ''}</div>
+    <p id="live-target" class="muted"></p>
+    <form id="live-form" class="form-grid">
+      <label for="live-name">配置名称</label><input id="live-name" required maxlength="128">
+      <label for="live-event">完整活动名称</label><input id="live-event" required maxlength="128">
+      <label for="live-pool">卡池名称</label><input id="live-pool" required maxlength="128">
+      <label for="live-follow">跟随操作员账号编号</label><input id="live-follow" type="number" required min="1" step="1">
+      <label for="live-passenger">固定乘客</label><input id="live-passenger" maxlength="64" placeholder="留空则跟随指定操作员当前选择的乘客">
+      <label class="check-row wide"><input id="live-enabled" type="checkbox" checked>启用直播配置</label>
+    </form>
+    <p class="muted">你的操作员账号编号：${data.operator_id}。活动总统计汇总该活动全部录入记录；配置名称可以不同，完整活动名称必须与录入活动一致。</p>
+    <div class="actions"><button id="live-create">创建独立配置</button><button id="live-save">保存所选配置</button></div>
+    <div class="form-grid"><label for="live-editors">授权操作员账号编号</label><input id="live-editors" placeholder="以英文逗号分隔；留空移除全部授权"></div>
+    <div class="actions"><button id="live-grant">保存授权（仅创建者）</button></div>
+    <p class="muted">选择配置并点击“用于本客户端”后，“直播页面设置”和 ON AIR 会操作该配置。创建新配置时复制当前全局显示设置，之后各配置独立保存。</p>
+  </div>`;
+  const select = document.getElementById('statistics-live-id');
+  const urlInput = document.getElementById('statistics-url');
+  const copyButton = document.getElementById('copy-url');
+  select.value = data.live_list.some(row => row.live_id === previewLiveId) ? previewLiveId : '';
+  const updateSelection = () => {
+    const url = new URL(data.url);
+    if (select.value) url.searchParams.set('live_id', select.value);
+    else url.searchParams.delete('live_id');
+    urlInput.value = url.href;
+    copyButton.textContent = '点击复制';
+    const row = data.live_list.find(item => item.live_id === select.value);
+    const values = row || {name: data.event_name, event_name: data.event_name, pool_name: data.pool_name, follow_operator_id: data.operator_id, fixed_nickname: '', is_enabled: true};
+    for (const [field, key] of [['name', 'name'], ['event', 'event_name'], ['pool', 'pool_name'], ['follow', 'follow_operator_id'], ['passenger', 'fixed_nickname']]) {
+      document.getElementById(`live-${field}`).value = values[key] ?? '';
     }
-    document.getElementById('copy-url').textContent = '已复制';
+    document.getElementById('live-enabled').checked = values.is_enabled;
+    document.getElementById('live-editors').value = row ? row.editor_id_list.join(',') : '';
+    document.getElementById('live-save').disabled = !row;
+    document.getElementById('live-grant').disabled = !row || row.owner_id !== data.operator_id;
+    document.getElementById('live-target').textContent = `客户端当前配置：${data.live_id || '默认活动'}；录入活动：${data.event_name}` + (row && row.event_name !== data.event_name ? '。注意：所选直播活动与当前录入活动不同。' : '');
+  };
+  select.onchange = updateSelection;
+  updateSelection();
+  copyButton.onclick = async () => {
+    const url = urlInput.value;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (_error) {
+      urlInput.select();
+      if (!document.execCommand('copy')) {
+        await showDialog('复制失败', '请手动选择并复制上方 URL。');
+        return;
+      }
+    }
+    if (urlInput.value === url) copyButton.textContent = '已复制';
+  };
+  let pending = false;
+  const perform = async (action, payload) => {
+    if (pending) return;
+    pending = true;
+    try {
+      const result = await api(action, payload);
+      if (result?.failed) return;
+      state = result;
+      renderStatistics(action === 'create' ? result.result.live_id : result.live_id);
+    } finally {
+      pending = false;
+    }
+  };
+  document.getElementById('live-refresh').onclick = () => perform('refresh');
+  document.getElementById('live-use').onclick = () => perform('select', {live_id: select.value});
+  if (data.is_admin) document.getElementById('live-default').onclick = () => perform('default', {values: {live_id: select.value}});
+  const save = (action) => {
+    if (!document.getElementById('live-form').reportValidity()) return;
+    const values = {
+      name: document.getElementById('live-name').value.trim(),
+      event_name: document.getElementById('live-event').value.trim(),
+      pool_name: document.getElementById('live-pool').value.trim(),
+      follow_operator_id: Number(document.getElementById('live-follow').value),
+      fixed_nickname: document.getElementById('live-passenger').value.trim() || null,
+      is_enabled: document.getElementById('live-enabled').checked,
+    };
+    return perform(action, {live_id: select.value, values});
+  };
+  document.getElementById('live-create').onclick = () => save('create');
+  document.getElementById('live-save').onclick = () => save('save');
+  document.getElementById('live-form').onsubmit = event => event.preventDefault();
+  document.getElementById('live-grant').onclick = async () => {
+    const text = document.getElementById('live-editors').value.trim();
+    if (text && !/^[1-9][0-9]*(\s*,\s*[1-9][0-9]*)*$/.test(text)) {
+      await showDialog('无法授权', '请填写正整数账号编号，并使用英文逗号分隔。');
+      return;
+    }
+    return perform('editors', {live_id: select.value, values: {editor_id_list: text ? text.split(',').map(Number) : []}});
   };
 }
 

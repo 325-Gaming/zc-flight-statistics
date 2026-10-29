@@ -34,6 +34,7 @@ from flight_session import get_login_info, has_flight_permission, logout
 from gacha_history import format_gacha_position, get_gacha_history
 from gacha_upload import GachaMoveTask, GachaStateTask, GachaUploadQueue
 from hotkeys import register_hotkeys
+from live_page_settings import request_live_page
 from result_overlay import result_overlay
 from page_display_settings import (
     PAGE_ACTIVITY_ITEM,
@@ -46,9 +47,7 @@ from page_display_settings import (
 )
 from page_pool_settings import (
     get_page_pool_settings,
-    get_pool_sync_message,
     select_initial_pool_name,
-    set_current_pool,
 )
 from page_style_settings import (
     DEFAULT_PAGE_STYLE,
@@ -67,7 +66,7 @@ WINDOWS = {
     "update": ("检查更新", 560, 330, (460, 280)),
     "gate": ("启动检查", 560, 340, (460, 300)),
     "page": ("直播页面设置", 620, 760, (560, 650)),
-    "statistics": ("查看统计", 760, 190, (640, 170)),
+    "statistics": ("查看统计", 820, 790, (700, 650)),
     "preview": ("显示器预览", 980, 670, (600, 400)),
 }
 HOTKEY_KEYS = (
@@ -191,6 +190,7 @@ class WebViewApp:
         self.page_style = DEFAULT_PAGE_STYLE
         self.page_is_active = False
         self.available_styles = (DEFAULT_PAGE_STYLE,)
+        self.live_id = str(core.config.get("live_id", "")).strip()
         self.upload_queue = GachaUploadQueue(
             core.client, core.submit_gacha_log_api_url, core.login_token,
             move_url=core.move_gacha_log_api_url,
@@ -593,8 +593,11 @@ class WebViewApp:
         try:
             settings = get_page_display_settings(
                 core.client, core.get_page_display_api_url, core.login_token,
+                **({"live_id": self.live_id} if getattr(self, "live_id", "") else {}),
             )
         except (httpx.HTTPError, ValueError):
+            if getattr(self, "live_id", ""):
+                raise
             self.page_style = DEFAULT_PAGE_STYLE
             self.page_is_active = False
             return
@@ -635,7 +638,7 @@ class WebViewApp:
         elif view == "history":
             data = self._history_state()
         elif view == "statistics":
-            data = {"url": core.statistics_page_url}
+            data = self._statistics_state()
         else:
             data = {"image": self.preview_image}
         return {"view": view, "theme": self.page_style, "data": data}
@@ -659,15 +662,13 @@ class WebViewApp:
             "current_pool": pool["current_pool_name"],
             "selected_pool": selected_pool,
             "monitors": core.capture.get_monitor_info(),
-            "pool_message": get_pool_sync_message(
-                str(config.get("pool_name", "")).strip(),
-                pool["current_pool_name"], selected_pool, pool["pool_name_list"],
-            ),
+            "pool_message": "此设置仅改变客户端录入活动，不会切换默认直播活动。",
         }
 
     def _page_state(self):
         settings = get_page_display_settings(
             core.client, core.get_page_display_api_url, core.login_token,
+            **({"live_id": self.live_id} if getattr(self, "live_id", "") else {}),
         )
         styles = get_available_page_style_list(core.client, core.get_page_style_list_api_url)
         self.available_styles = styles
@@ -677,6 +678,16 @@ class WebViewApp:
             "activity": PAGE_ACTIVITY_ITEM,
             "display_items": PAGE_DISPLAY_ITEMS,
             "text_items": PAGE_TEXT_ITEMS,
+            "live_id": getattr(self, "live_id", ""),
+        }
+
+    def _statistics_state(self):
+        data = request_live_page(
+            core.client, core.set_current_user_api_url, core.login_token, "get-live-list",
+        )
+        return {
+            **data, "url": core.statistics_page_url, "live_id": self.live_id,
+            "event_name": self.full_event_name, "pool_name": core.pool_name,
         }
 
     def _history_state(self):
@@ -752,28 +763,12 @@ class WebViewApp:
         with temporary.open("w", encoding="utf-8") as config_file:
             json.dump(updated, config_file, ensure_ascii=False, indent=4)
             config_file.write("\n")
-        previous_pool = core.pool_name
-        try:
-            set_current_pool(
-                core.client, core.set_current_pool_api_url, core.login_token,
-                values["pool_name"],
-            )
-            temporary.replace(core.CONFIG_PATH)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            if previous_pool != values["pool_name"]:
-                try:
-                    set_current_pool(
-                        core.client, core.set_current_pool_api_url,
-                        core.login_token, previous_pool,
-                    )
-                except (httpx.HTTPError, ValueError):
-                    pass
-            raise
+        temporary.replace(core.CONFIG_PATH)
         core.config.clear()
         core.config.update(updated)
         core.event_name = values["event_name"]
         core.pool_name = values["pool_name"]
+        self.last_synced_user = None
         core.target_monitor_id = monitor_id
         result_overlay.configure(show_overlay, core.capture.monitors[monitor_id])
         core.user_name_list_file = values["user_name_list_file"]
@@ -782,6 +777,12 @@ class WebViewApp:
         if replacement_names is not None:
             self.user_name_list = replacement_names
             self._current_user(0)
+        else:
+            if not core.request_set_current_user(self.nickname):
+                self.status = "运行配置已保存，当前乘客尚未同步；请重新选择当前乘客重试。"
+                self._emit_main()
+                raise RuntimeError(self.status)
+            self.last_synced_user = self.nickname
         self._emit_main()
         return True
 
@@ -927,11 +928,13 @@ class WebViewApp:
                     raise ValueError("直播页面活跃刷新设置必须为布尔值")
                 settings = get_page_display_settings(
                     core.client, core.get_page_display_api_url, core.login_token,
+                    **({"live_id": self.live_id} if getattr(self, "live_id", "") else {}),
                 )
                 settings["is_active"] = enabled
                 settings = set_page_display_settings(
                     core.client, core.set_page_display_api_url,
                     core.login_token, settings,
+                    **({"live_id": self.live_id} if getattr(self, "live_id", "") else {}),
                 )
                 self.page_is_active = settings["is_active"]
                 self._emit_main()
@@ -1076,6 +1079,7 @@ class WebViewApp:
             settings = set_page_display_settings(
                 core.client, core.set_page_display_api_url,
                 core.login_token, payload,
+                **({"live_id": self.live_id} if getattr(self, "live_id", "") else {}),
             )
             self.page_style = settings["page_style"]
             self.page_is_active = settings["is_active"]
@@ -1083,6 +1087,52 @@ class WebViewApp:
                 self._emit(target, {"theme": self.page_style})
             self._emit_main()
             return settings
+        if view == "statistics":
+            if name == "refresh":
+                return self._statistics_state()
+            if name == "select":
+                if "page" in self.windows:
+                    raise RuntimeError("请先关闭直播页面设置窗口，再切换直播配置")
+                live_id = payload.get("live_id")
+                if not isinstance(live_id, str):
+                    raise ValueError("直播配置 ID 无效")
+                data = self._statistics_state()
+                if live_id and live_id not in {row["live_id"] for row in data["live_list"]}:
+                    raise ValueError("直播配置不存在或没有管理权限")
+                settings = get_page_display_settings(
+                    core.client, core.get_page_display_api_url, core.login_token,
+                    **({"live_id": live_id} if live_id else {}),
+                )
+                with core.CONFIG_PATH.open(encoding="utf-8") as config_file:
+                    config = json.load(config_file)
+                config["live_id"] = live_id
+                temporary = core.CONFIG_PATH.with_suffix(".json.tmp")
+                with temporary.open("w", encoding="utf-8") as config_file:
+                    json.dump(config, config_file, ensure_ascii=False, indent=4)
+                    config_file.write("\n")
+                temporary.replace(core.CONFIG_PATH)
+                self.live_id = live_id
+                core.config["live_id"] = live_id
+                self.page_style = settings["page_style"]
+                self.page_is_active = settings["is_active"]
+                for target in list(self.windows):
+                    self._emit(target, {"theme": self.page_style})
+                self._emit_main()
+                return self._statistics_state()
+            actions = {"create": "create-live", "save": "set-live", "editors": "set-live-editor", "default": "set-default-live"}
+            if name in actions:
+                result = request_live_page(
+                    core.client, core.set_current_user_api_url, core.login_token, actions[name],
+                    live_id=payload.get("live_id", ""), payload=payload["values"],
+                )
+                try:
+                    state = self._statistics_state()
+                except (httpx.HTTPError, ValueError) as error:
+                    raise RuntimeError(
+                        f"直播配置操作已保存（ID：{result.get('live_id', '') or '默认活动'}），"
+                        f"但刷新列表失败：{error}。请刷新列表，不要重复创建。"
+                    ) from error
+                return {"result": result, **state}
         raise ValueError("不支持的操作")
 
     def _enter_client(self):

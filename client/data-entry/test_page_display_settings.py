@@ -61,6 +61,19 @@ class PageDisplaySettingsTests(unittest.TestCase):
 
         self.assertEqual(result, self.settings)
 
+    def test_default_configuration_identity_is_checked_when_saving(self):
+        def handler(request):
+            if request.method == "GET":
+                return httpx.Response(200, json={**self.settings, "live_id": "selected-default"})
+            self.assertEqual(request.url.params["expected_live_id"], "selected-default")
+            self.assertNotIn("live_id", json.loads(request.content))
+            return httpx.Response(409, json={"detail": "默认直播配置已切换"})
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            settings = get_page_display_settings(client, "https://example.test/page", "test-token")
+            with self.assertRaises(httpx.HTTPStatusError):
+                set_page_display_settings(client, "https://example.test/page", "test-token", settings)
+
     def test_get_page_display_settings_rejects_missing_fields(self):
         with httpx.Client(
             transport=httpx.MockTransport(
