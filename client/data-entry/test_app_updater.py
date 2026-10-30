@@ -12,12 +12,12 @@ from unittest.mock import patch
 import app_updater
 
 
-def _archive(path, version, files):
+def _archive(path, version, files, commit="a" * 40):
     manifest = {
         "schema_version": 1,
         "version": version,
         "tag": f"data-entry/v{version}",
-        "commit": "a" * 40,
+        "commit": commit,
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
     }
     with zipfile.ZipFile(path, "w") as output:
@@ -308,6 +308,7 @@ class AppUpdaterTests(unittest.TestCase):
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             git(root, "config", "user.name", "Test")
             git(root, "config", "user.email", "test@example.com")
+            git(root, "config", "commit.gpgsign", "false")
             base = root / "client/data-entry"
             base.mkdir(parents=True)
             (base / "version.py").write_text('__version__ = "2.2.0"\n')
@@ -352,6 +353,180 @@ class AppUpdaterTests(unittest.TestCase):
             self.assertFalse((base / "generated.py").exists())
             self.assertFalse((runtime / "update-transaction.json").exists())
             self.assertIn("依赖环境", app_updater.read_update_failure(base))
+
+
+class GitReleaseUpdateTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = pathlib.Path(self.directory.name) / "repo"
+        self.root.mkdir()
+        self.git("init", "-b", "master")
+        self.git("config", "user.name", "Test")
+        self.git("config", "user.email", "test@example.com")
+        self.git("config", "commit.gpgsign", "false")
+        self.git("config", "core.autocrlf", "false")
+        self.base = self.root / "client/data-entry"
+        self.base.mkdir(parents=True)
+        self.old_files = {
+            "version.py": b'__version__ = "2.3.3"\n',
+            "config.example.json": b'{"old": true}\n',
+            "requirements.txt": b"httpx\n",
+            "obsolete.py": b"obsolete\n",
+            "start.bat": b"@echo off\n",
+        }
+        (self.root / ".gitattributes").write_text("*.bat text eol=crlf\n")
+        for name, contents in self.old_files.items():
+            (self.base / name).write_bytes(contents)
+        self.git("add", "--", ".gitattributes", "client/data-entry")
+        self.git("commit", "-m", "old release")
+        old_commit = self.git("rev-parse", "HEAD")
+        self.git_files = {
+            **self.old_files,
+            "version.py": b'__version__ = "2.4.0"\n',
+            "config.example.json": b'{"live_id": ""}\n',
+            "new.py": b"new module\n",
+        }
+        del self.git_files["obsolete.py"]
+        for name, contents in self.git_files.items():
+            (self.base / name).write_bytes(contents)
+        (self.base / "obsolete.py").unlink()
+        (self.base / "test_keep.py").write_bytes(b"keep test source\n")
+        self.git("add", "--", "client/data-entry")
+        self.git("commit", "-m", "Git upgrade")
+        self.head = self.git("rev-parse", "HEAD")
+        self.stage = self.base / ".runtime/update-test"
+        self.stage.mkdir(parents=True)
+        self.old_manifest = _archive(self.stage / "old.zip", "2.3.3", self.old_files, old_commit)
+        (self.base / "release-manifest.json").write_text(json.dumps(self.old_manifest))
+        (self.base / "config.json").write_bytes(b'{"personal": true}\n')
+        (self.base / "passengers.csv").write_bytes(b"personal list\n")
+        self.offer = self.prepare_release()
+
+    def git(self, *arguments):
+        return subprocess.run(
+            ["git", *arguments], cwd=self.root, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ).stdout.decode().strip()
+
+    def prepare_release(self, version="2.4.0"):
+        self.target_files = {
+            **self.git_files,
+            "version.py": f'__version__ = "{version}"\n'.encode(),
+        }
+        archive = self.stage / "release.zip"
+        self.target_manifest = _archive(archive, version, self.target_files, self.head)
+        return {
+            "mode": "release", "tag": f"data-entry/v{version}", "version": version,
+            "minimum_version": "2.4.0", "size": archive.stat().st_size,
+            "digest": "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest(),
+        }
+
+    def test_helper_repairs_old_manifest_after_git_upgrade(self):
+        self.offer["force_dependencies"] = True
+        plan = {
+            "base_dir": str(self.base), "parent_pid": 123, "offer": self.offer,
+            "executable": "/test/python", "argv": ["webview_app.py"],
+        }
+        plan_path = self.stage / "plan.json"
+        plan_path.write_text(json.dumps(plan))
+        with patch.object(app_updater, "_wait_for_exit"), \
+                patch.object(app_updater, "_install_dependencies") as install, \
+                patch.object(app_updater.os, "execv") as restart:
+            app_updater._run_helper(plan_path)
+        install.assert_called_once_with(self.base)
+        restart.assert_called_once()
+        self.assertEqual(json.loads((self.base / "release-manifest.json").read_text()), self.target_manifest)
+        for name, contents in self.target_files.items():
+            self.assertEqual((self.base / name).read_bytes(), contents)
+        self.assertEqual((self.base / "config.json").read_bytes(), b'{"personal": true}\n')
+        self.assertEqual((self.base / "passengers.csv").read_bytes(), b"personal list\n")
+        self.assertTrue((self.base / "test_keep.py").exists())
+        self.assertIsNone(app_updater.read_update_failure(self.base))
+        self.assertFalse(self.stage.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+
+    def test_rejects_local_edit_even_if_git_status_hides_it(self):
+        path = "client/data-entry/config.example.json"
+        self.git("update-index", "--assume-unchanged", "--", path)
+        (self.base / "config.example.json").write_bytes(b'{"local": true}\n')
+        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=no"), "")
+        with self.assertRaisesRegex(ValueError, "本地程序文件已修改"):
+            app_updater._apply_release(self.base, self.stage, self.offer)
+        self.assertEqual((self.base / "config.example.json").read_bytes(), b'{"local": true}\n')
+        self.assertEqual(json.loads((self.base / "release-manifest.json").read_text()), self.old_manifest)
+
+    def test_rejects_edit_to_new_git_file_absent_from_old_manifest(self):
+        (self.base / "new.py").write_bytes(b"local edit\n")
+        with self.assertRaisesRegex(ValueError, "本地个人文件重名"):
+            app_updater._apply_release(self.base, self.stage, self.offer)
+        self.assertEqual((self.base / "new.py").read_bytes(), b"local edit\n")
+        self.assertEqual(json.loads((self.base / "release-manifest.json").read_text()), self.old_manifest)
+
+    def test_standalone_release_keeps_strict_hash_protection(self):
+        # Removing Git recognition uses a separate ZIP installation, not a bypass.
+        plain = pathlib.Path(self.directory.name) / "plain/client/data-entry"
+        stage = plain / ".runtime/update-test"
+        stage.mkdir(parents=True)
+        for name, contents in self.git_files.items():
+            (plain / name).write_bytes(contents)
+        (plain / "release-manifest.json").write_text(json.dumps(self.old_manifest))
+        (stage / "release.zip").write_bytes((self.stage / "release.zip").read_bytes())
+        with self.assertRaisesRegex(ValueError, "本地程序文件已修改"):
+            app_updater._apply_release(plain, stage, self.offer)
+
+    def test_crlf_checkout_matches_git_baseline(self):
+        (self.base / "start.bat").write_bytes(b"@echo off\r\n")
+        self.assertEqual(self.git("diff", "--", "client/data-entry/start.bat"), "")
+        app_updater._apply_release(self.base, self.stage, self.offer)
+        self.assertEqual((self.base / "start.bat").read_bytes(), b"@echo off\n")
+
+    def test_dependency_failure_restores_git_files_and_old_manifest(self):
+        offer = self.prepare_release("2.4.1")
+        offer["force_dependencies"] = True
+        with patch.object(app_updater, "_install_dependencies", side_effect=RuntimeError("offline")):
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                app_updater._apply_release(self.base, self.stage, offer)
+        for name, contents in self.git_files.items():
+            self.assertEqual((self.base / name).read_bytes(), contents)
+        self.assertEqual(json.loads((self.base / "release-manifest.json").read_text()), self.old_manifest)
+        self.assertIsNotNone(app_updater.read_update_failure(self.base))
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+
+    def test_linked_worktree_uses_its_own_git_baseline(self):
+        worktree = pathlib.Path(self.directory.name) / "linked"
+        self.git("worktree", "add", "-b", "linked", str(worktree), "HEAD")
+        base = worktree / "client/data-entry"
+        stage = base / ".runtime/update-test"
+        stage.mkdir(parents=True)
+        (base / "release-manifest.json").write_text(json.dumps(self.old_manifest))
+        (stage / "release.zip").write_bytes((self.stage / "release.zip").read_bytes())
+        app_updater._apply_release(base, stage, self.offer)
+        self.assertEqual(json.loads((base / "release-manifest.json").read_text()), self.target_manifest)
+        self.assertTrue((base / "test_keep.py").exists())
+
+    def test_git_without_manifest_still_protects_local_edits(self):
+        (self.base / "release-manifest.json").unlink()
+        (self.base / "new.py").write_bytes(b"local edit\n")
+        with self.assertRaisesRegex(ValueError, "本地个人文件重名"):
+            app_updater._apply_release(self.base, self.stage, self.offer)
+        self.assertEqual((self.base / "new.py").read_bytes(), b"local edit\n")
+
+    def test_untracked_new_file_collision_is_not_claimed_by_git(self):
+        self.target_files["personal.py"] = b"release file\n"
+        archive = self.stage / "release.zip"
+        _archive(archive, "2.4.0", self.target_files, self.head)
+        self.offer.update(size=archive.stat().st_size, digest="sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest())
+        (self.base / "personal.py").write_bytes(b"personal file\n")
+        with self.assertRaisesRegex(ValueError, "本地个人文件重名"):
+            app_updater._apply_release(self.base, self.stage, self.offer)
+        self.assertEqual((self.base / "personal.py").read_bytes(), b"personal file\n")
+
+    def test_unavailable_git_does_not_bypass_local_validation(self):
+        with patch.object(app_updater.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(ValueError, "无法核实 Git 安装状态"):
+                app_updater._apply_release(self.base, self.stage, self.offer)
+        self.assertEqual(json.loads((self.base / "release-manifest.json").read_text()), self.old_manifest)
 
 
 if __name__ == "__main__":

@@ -625,7 +625,33 @@ def _wait_for_exit(pid):
     raise TimeoutError("等待旧版客户端退出超时")
 
 
-def _check_local_files(base_dir):
+def _git_release_files(base_dir):
+    root = _git_root(base_dir)
+    if root is None:
+        if (base_dir.parent.parent / ".git").exists():
+            raise ValueError("无法核实 Git 安装状态，请检查 Git 是否可用及仓库状态")
+        return None, {}
+    files = {}
+    for record in _git(root, "ls-tree", "-r", "-z", "HEAD", "--", "client/data-entry").split("\0"):
+        if not record:
+            continue
+        metadata, path = record.split("\t", 1)
+        mode, kind, object_id = metadata.split()
+        name = path.removeprefix("client/data-entry/")
+        if mode in {"100644", "100755"} and kind == "blob" and _safe_name(name):
+            files[name] = object_id
+    return root, files
+
+
+def _matches_git_file(root, files, name):
+    if name not in files:
+        return False
+    # hash-object applies Git's content normalization, including Windows CRLF.
+    # Compare actual content to HEAD rather than trusting status/assume-unchanged.
+    return _git(root, "hash-object", "--", f"client/data-entry/{name}") == files[name]
+
+
+def _check_local_files(base_dir, git_root=None, git_files=None):
     manifest_path = base_dir / "release-manifest.json"
     if manifest_path.is_symlink():
         raise ValueError("现有安装清单不能是符号链接")
@@ -639,7 +665,10 @@ def _check_local_files(base_dir):
         if not isinstance(name, str) or not _safe_name(name) or not isinstance(expected, str):
             raise ValueError("现有安装清单包含不安全文件")
         target = base_dir / name
-        if target.is_symlink() or (target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() != expected):
+        if target.is_symlink():
+            raise ValueError(f"本地程序文件已修改，无法自动覆盖：{name}")
+        if (target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() != expected
+                and not _matches_git_file(git_root, git_files or {}, name)):
             raise ValueError(f"本地程序文件已修改，无法自动覆盖：{name}")
     return set(hashes)
 
@@ -833,7 +862,8 @@ def _apply_release(base_dir, stage, offer):
         raise ValueError("暂存发布包的 SHA-256 已变化")
     files, manifest = _validate_archive(archive_path, offer["tag"])
     has_manifest = (base_dir / "release-manifest.json").exists()
-    previous = _check_local_files(base_dir)
+    git_root, git_files = _git_release_files(base_dir)
+    previous = _check_local_files(base_dir, git_root, git_files)
     names = set(files) | (previous - set(files)) | {"release-manifest.json"}
     backups = {}
     for name in names:
@@ -846,7 +876,8 @@ def _apply_release(base_dir, stage, offer):
         if target.exists():
             if not target.is_file():
                 raise ValueError(f"更新路径不是文件：{name}")
-            if has_manifest and name in files and name not in previous:
+            if ((has_manifest or git_root is not None) and name in files and name not in previous
+                    and not _matches_git_file(git_root, git_files, name)):
                 raise ValueError(f"新版本文件与本地个人文件重名：{name}")
             backups[name] = target.read_bytes()
     old_requirements = backups.get("requirements.txt")
