@@ -18,6 +18,7 @@ class GachaUploadTask:
     gacha_index: int
     character_list: tuple[str, ...]
     request_id: str
+    is_gift: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class GachaUploadQueue:
         count,
         gacha_index,
         character_list,
+        *, is_gift=False,
     ):
         task = GachaUploadTask(
             activity_id=activity_id,
@@ -92,6 +94,7 @@ class GachaUploadQueue:
             gacha_index=gacha_index,
             character_list=tuple(character_list),
             request_id=str(uuid.uuid4()),
+            is_gift=is_gift,
         )
         self._put(task)
         return task
@@ -185,6 +188,7 @@ class GachaUploadQueue:
                             ensure_ascii=False,
                         ),
                         "request_id": task.request_id,
+                        "is_gift": task.is_gift,
                     }
                 elif isinstance(task, GachaStateTask):
                     url = self.revoke_url if task.is_revoked else self.restore_url

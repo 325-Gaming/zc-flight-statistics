@@ -31,7 +31,7 @@ from app_updater import (
 )
 from event_settings import compose_event_name
 from flight_session import get_login_info, has_flight_permission, logout
-from gacha_history import format_gacha_position, get_gacha_history
+from gacha_history import format_gacha_position, get_gacha_history, get_passenger_state
 from gacha_upload import GachaMoveTask, GachaStateTask, GachaUploadQueue
 from hotkeys import register_hotkeys
 from live_page_settings import request_live_page
@@ -60,7 +60,7 @@ UI_PATH = str(core.BASE_DIR / "webview_ui/index.html")
 GATE_UI_PATH = str(core.BASE_DIR / "webview_ui/gate.html")
 WINDOWS = {
     "main": (f"{core._name} {core._version}", 1024, 800, (860, 680)),
-    "import": ("导入乘客名单", 560, 440, (420, 320)),
+    "import": ("编辑乘客名单", 560, 440, (420, 320)),
     "history": ("抽卡记录", 1000, 520, (760, 400)),
     "settings": ("设置", 900, 960, (700, 700)),
     "update": ("检查更新", 560, 330, (460, 280)),
@@ -179,7 +179,10 @@ class WebViewApp:
         self.last_synced_user = None
         self.gacha_index = 1
         self.result = "等待识别结果……"
-        self.status = ""
+        self.status = getattr(core, "monitor_error", "")
+        self.passenger_state = {}
+        self.gift_operator = None
+        self.pending_uploads = {}
         self.captain_profile = None
         self.history_filter = "current"
         self.history_nickname = None
@@ -210,6 +213,13 @@ class WebViewApp:
     def _main_state(self):
         with self.lock:
             return {
+                "passenger_state": dict(getattr(self, "passenger_state", {})),
+                "pending_passengers": [task.nickname for task in getattr(self, "pending_uploads", {}).values()
+                    if task.activity_id == core.activity_id and task.pool_name == core.pool_name],
+                "gift_operator": getattr(self, "gift_operator", None),
+                "role_label": next(("机长" if item["role"] == "captain" else "乘务员"
+                    for item in getattr(self, "activity_list", [])
+                    if item["activity_id"] == core.activity_id), "权限待确认"),
                 "passengers": list(self.user_name_list),
                 "user_id": self.user_id,
                 "nickname": self.nickname,
@@ -248,30 +258,40 @@ class WebViewApp:
             self.result = text
         self._emit_main()
 
-    def enqueue_gacha_result(self, count, character_list):
+    def enqueue_gacha_result(self, count, character_list, *, is_gift=False):
         with self.lock:
             nickname = self.nickname
             index = self.gacha_index
             if not nickname:
                 raise ValueError("当前乘客昵称不能为空")
-            self.upload_queue.submit(
+            task = self.upload_queue.submit(
                 activity_id=core.activity_id,
                 pool_name=core.pool_name,
                 nickname=nickname,
                 count=count,
                 gacha_index=index,
                 character_list=character_list,
+                is_gift=is_gift,
             )
+            self.pending_uploads[task.request_id] = task
             self.gacha_index += count
-            self.status = f"第 {index} 抽已加入上传队列"
+            position = f"第 {index}-{index + count - 1} 抽" if count > 1 else f"第 {index} 抽"
+            self.status = f"{nickname}：{'赠送记录' if is_gift else position}已加入上传队列"
         self._emit_main()
 
     def _upload_done(self, task, _response):
         with self.lock:
+            if hasattr(task, "request_id"):
+                self.pending_uploads.pop(task.request_id, None)
             self.status = "上传或记录操作已完成"
             if isinstance(task, (GachaMoveTask, GachaStateTask)):
                 self.history_pending = False
                 self.history_status = "记录操作已完成"
+        try:
+            self._refresh_passengers()
+        except (httpx.HTTPError, ValueError) as error:
+            self.gift_operator = None
+            self.status = f"操作已完成，但乘客状态刷新失败：{error}；请刷新名单，不要重复上传"
         self._emit_main()
         if "history" in self.windows:
             threading.Thread(
@@ -282,28 +302,50 @@ class WebViewApp:
     def _refresh_history_after_upload(self):
         try:
             self._emit("history", self._history_state())
-        except (httpx.HTTPError, ValueError):
-            pass
+        except (httpx.HTTPError, ValueError) as error:
+            self._emit("history", {"history_status": f"刷新失败：{error}"})
+
+    def _refresh_passengers(self):
+        data = get_passenger_state(core.client, core.set_current_user_api_url,
+            core.login_token, core.activity_id, core.pool_name)
+        with self.lock:
+            self.passenger_state = data["passengers"]
+            self.gift_operator = data["gift_operator"]
+            pending = sum(task.count for task in self.pending_uploads.values()
+                if task.nickname == self.nickname and task.activity_id == core.activity_id
+                and task.pool_name == core.pool_name)
+            self.gacha_index = self.passenger_state.get(self.nickname, {}).get("pulls", 0) + pending + 1
 
     def _upload_failed(self, task, error):
+        with self.lock:
+            if hasattr(task, "request_id"):
+                self.pending_uploads.pop(task.request_id, None)
         action = "记录操作" if isinstance(task, (GachaMoveTask, GachaStateTask)) else "上传"
         if isinstance(task, (GachaMoveTask, GachaStateTask)):
             self.history_pending = False
             self.history_status = f"{action}失败：{error}"
-        self._set_status(f"{action}失败：{error}")
+        message = f"{action}失败：{error}"
+        try:
+            self._refresh_passengers()
+        except (httpx.HTTPError, ValueError) as refresh_error:
+            self.gift_operator = None
+            message += f"；状态刷新也失败：{refresh_error}，请刷新名单后核对记录"
+        self._set_status(message)
         if "history" in self.windows:
             self._emit("history", {"history_status": self.history_status, "pending": False})
 
     def _current_user(self, index):
         with self.lock:
             self.user_id = max(0, index)
-            self.gacha_index = 1
             self.nickname = (
                 self.user_name_list[self.user_id]
                 if self.user_id < len(self.user_name_list)
                 else f"乘客{self.user_id + 1}"
             )
             nickname = self.nickname
+            pending = sum(task.count for task in self.pending_uploads.values() if task.nickname == nickname
+                and task.activity_id == core.activity_id and task.pool_name == core.pool_name)
+            self.gacha_index = self.passenger_state.get(nickname, {}).get("pulls", 0) + pending + 1
         if nickname != self.last_synced_user and core.request_set_current_user(nickname):
             self.last_synced_user = nickname
         self._emit_main()
@@ -628,9 +670,10 @@ class WebViewApp:
         elif view == "main":
             self._load_style()
             self._load_captain_profile()
+            self._refresh_passengers()
             data = self._main_state()
         elif view == "import":
-            data = {}
+            data = {"passengers": list(self.user_name_list)}
         elif view == "settings":
             data = self._settings_state()
         elif view == "update":
@@ -681,18 +724,34 @@ class WebViewApp:
             "activity": PAGE_ACTIVITY_ITEM,
             "display_items": PAGE_DISPLAY_ITEMS,
             "text_items": PAGE_TEXT_ITEMS,
-            "live_id": getattr(self, "live_id", ""),
+            "live_id": settings.get("live_id", ""),
+            "live_name": settings.get("live_name", "旧版默认活动"),
         }
+
+    def _refresh_main_page_settings(self):
+        settings = get_page_display_settings(
+            core.client, core.get_page_display_api_url, core.login_token,
+            **({"live_id": self.live_id} if self.live_id else {}),
+        )
+        self.page_style = settings["page_style"]
+        self.page_is_active = settings["is_active"]
+        for target in list(self.windows):
+            self._emit(target, {"theme": self.page_style})
+        self._emit_main()
 
     def _statistics_state(self):
         data = request_live_page(
             core.client, core.set_current_user_api_url, core.login_token, "get-live-list",
+        )
+        pool = get_page_pool_settings(
+            core.client, core.get_pool_list_api_url, core.login_token,
         )
         return {
             **data, "url": core.statistics_page_url, "live_id": self.live_id,
             "activity_id": core.activity_id,
             "activity_list": list(self.activity_list),
             "event_name": self.full_event_name, "pool_name": core.pool_name,
+            "pool_names": pool["pool_name_list"],
         }
 
     def _history_state(self):
@@ -708,6 +767,8 @@ class WebViewApp:
             position = positions.get(record.nickname, 1)
             if record.is_revoked:
                 label = "—"
+            elif record.is_gift:
+                label = "—"
             else:
                 label = format_gacha_position(position, record.count)
                 positions[record.nickname] = position + record.count
@@ -720,10 +781,10 @@ class WebViewApp:
                 "result": " ".join(record.character_list),
                 "created_at": record.created_at.replace("T", " ")[:19],
                 "revoked": record.is_revoked,
+                "is_gift": record.is_gift,
             })
-        if nickname == self.nickname:
-            self.gacha_index = positions.get(self.nickname, 1)
-            self._emit_main()
+        self._refresh_passengers()
+        self._emit_main()
         return {
             "rows": rows,
             "passengers": list(self.user_name_list),
@@ -781,12 +842,20 @@ class WebViewApp:
         core.activity_id = values["activity_id"]
         core.event_name = activity["name"]
         core.pool_name = values["pool_name"]
+        self.passenger_state = {}
+        self.gift_operator = None
         self.last_synced_user = None
         core.target_monitor_id = monitor_id
+        core.monitor_error = ""
         result_overlay.configure(show_overlay, core.capture.monitors[monitor_id])
         core.user_name_list_file = values["user_name_list_file"]
         for key, value in hotkeys.items():
             setattr(core, key, value)
+        try:
+            self._refresh_passengers()
+        except (httpx.HTTPError, ValueError) as error:
+            self._emit_main()
+            raise RuntimeError(f"配置已保存，但乘客状态刷新失败：{error}。请刷新名单状态，不要重复保存。") from error
         if replacement_names is not None:
             self.user_name_list = replacement_names
             self._current_user(0)
@@ -918,12 +987,29 @@ class WebViewApp:
             raise ValueError("不支持的操作")
 
         if view == "main":
-            if name == "overlay":
+            if name == "refresh_passengers":
+                self._refresh_passengers()
+                self._emit_main()
+            elif name == "gift":
+                self._refresh_passengers()
+                info = self.passenger_state.get(self.nickname, {})
+                if not self.gift_operator or info.get("has_gift"):
+                    raise ValueError("当前卡池不支持赠送，或当前乘客已经领取")
+                if any(task.is_gift and task.nickname == self.nickname
+                       and task.activity_id == core.activity_id and task.pool_name == core.pool_name
+                       for task in self.pending_uploads.values()):
+                    raise ValueError("赠送记录正在上传，请勿重复添加")
+                self.enqueue_gacha_result(0, [self.gift_operator], is_gift=True)
+            elif name == "overlay":
                 enabled = payload.get("enabled")
                 if not isinstance(enabled, bool):
                     raise ValueError("悬浮窗口显示设置必须为布尔值")
                 if enabled and sys.platform != "win32":
                     raise ValueError("识别结果悬浮窗口目前仅支持 Windows")
+                if enabled:
+                    core.capture.refresh_monitors()
+                    if not 0 <= core.target_monitor_id < len(core.capture.monitors):
+                        raise ValueError("截图显示器已不可用，请在设置中重新选择")
                 with core.CONFIG_PATH.open(encoding="utf-8") as config_file:
                     updated = json.load(config_file)
                 updated["show_result_overlay"] = enabled
@@ -933,7 +1019,8 @@ class WebViewApp:
                     config_file.write("\n")
                 temporary.replace(core.CONFIG_PATH)
                 core.config["show_result_overlay"] = enabled
-                result_overlay.configure(enabled, core.capture.monitors[core.target_monitor_id])
+                if 0 <= core.target_monitor_id < len(core.capture.monitors):
+                    result_overlay.configure(enabled, core.capture.monitors[core.target_monitor_id])
                 self._emit_main()
             elif name == "on_air":
                 enabled = payload.get("enabled")
@@ -1033,8 +1120,12 @@ class WebViewApp:
                 names = [line.strip() for line in text.splitlines() if line.strip()]
                 if not names:
                     raise ValueError("乘客名单中没有乘客姓名")
+                if len(names) != len(set(names)):
+                    raise ValueError("乘客姓名不能重复")
+                current = getattr(self, "nickname", "")
+                index = names.index(current) if current in names else min(getattr(self, "user_id", 0), len(names) - 1)
                 self.user_name_list = names
-                self._current_user(0)
+                self._current_user(index)
                 return True
             raise ValueError("不支持的操作")
         if view == "history":
@@ -1104,6 +1195,7 @@ class WebViewApp:
             return settings
         if view == "statistics":
             if name == "refresh":
+                self._refresh_main_page_settings()
                 return self._statistics_state()
             if name == "select":
                 if "page" in self.windows:
@@ -1156,11 +1248,13 @@ class WebViewApp:
                         config_file.write("\n")
                     temporary.replace(core.CONFIG_PATH)
                 try:
+                    if name in {"default", "remove"} and not self.live_id:
+                        self._refresh_main_page_settings()
                     state = self._statistics_state()
                 except (httpx.HTTPError, ValueError) as error:
                     raise RuntimeError(
                         f"直播配置操作已保存（ID：{result.get('live_id', '') or '默认活动'}），"
-                        f"但刷新列表失败：{error}。请刷新列表，不要重复创建。"
+                        f"但刷新状态或列表失败：{error}。请刷新列表，不要重复创建。"
                     ) from error
                 return {"result": result, **state}
         raise ValueError("不支持的操作")

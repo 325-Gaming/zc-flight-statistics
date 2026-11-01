@@ -238,18 +238,16 @@ class MultiMonitorCapture:
     def capture_monitor(self, monitor_id=1, is_save=False, save_dir="./screenshots"):
         t0 = time.time()
         """截取指定显示器"""
-        if monitor_id < 0 or monitor_id >= len(self.monitors):
-            raise ValueError(
-                f"显示器编号 {monitor_id} 不存在，可用范围为 0-{len(self.monitors) - 1}"
-            )
-
         # 创建保存目录
         if is_save:
             os.makedirs(save_dir, exist_ok=True)
 
         # 快捷键回调可能运行在后台线程，每次截图创建独立会话更安全。
         with result_overlay.hidden_for_capture(), mss.mss() as sct:
-            screenshot = sct.grab(self.monitors[monitor_id])
+            self.monitors = sct.monitors
+            if not 0 <= monitor_id < len(self.monitors):
+                raise ValueError(f'显示器编号 {monitor_id} 已不可用，请重新选择显示器')
+            screenshot = sct.grab(sct.monitors[monitor_id])
         img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
         # 生成文件名
@@ -272,10 +270,16 @@ class MultiMonitorCapture:
             self.sct.close()
 
 capture = MultiMonitorCapture()
-result_overlay.configure(
-    config.get('show_result_overlay', sys.platform == 'win32') is True,
-    capture.monitors[target_monitor_id],
-)
+monitor_error = ''
+if 0 <= target_monitor_id < len(capture.monitors):
+    result_overlay.configure(
+        config.get('show_result_overlay', sys.platform == 'win32') is True,
+        capture.monitors[target_monitor_id],
+    )
+else:
+    monitor_error = f'原截图显示器 {target_monitor_id} 已不可用，请在设置中重新选择显示器。'
+    print(monitor_error)
+
 
 
 def seperate_image_gacha10(image):
@@ -1135,7 +1139,7 @@ class SimpleApp:
         record_positions = {}
         for record in records:
             position = positions.get(record.nickname, 1)
-            if record.is_revoked:
+            if record.is_revoked or record.is_gift:
                 record_positions[record.record_id] = "—"
             else:
                 record_positions[record.record_id] = format_gacha_position(
@@ -1155,7 +1159,7 @@ class SimpleApp:
                     record.nickname,
                     record.sequence_no,
                     record_positions[record.record_id],
-                    " ".join(record.character_list),
+                    ("[赠送] " if record.is_gift else "") + " ".join(record.character_list),
                     created_at,
                     "已撤销" if record.is_revoked else "有效",
                 ),
@@ -2681,7 +2685,8 @@ class SimpleApp:
             character_list=character_list,
         )
         self.gacha_index += count
-        print(f'上传任务已加入队列: 第 {gacha_index} 抽，共 {count} 抽')
+        position = f'{gacha_index}-{gacha_index + count - 1}' if count > 1 else str(gacha_index)
+        print(f'上传任务已加入队列: 第 {position} 抽')
 
     def _queue_task_succeeded(self, task, response):
         if isinstance(task, GachaUploadTask):

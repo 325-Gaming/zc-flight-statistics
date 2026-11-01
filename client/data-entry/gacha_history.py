@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
 from flight_session import auth_headers
 
@@ -17,6 +18,7 @@ class GachaHistoryRecord:
     created_at: str
     is_revoked: bool
     request_id: str | None
+    is_gift: bool = False
 
     @classmethod
     def from_payload(cls, payload):
@@ -25,7 +27,11 @@ class GachaHistoryRecord:
             not isinstance(character, str) for character in character_list
         ):
             raise ValueError("历史记录中的抽卡结果无效")
+        is_gift = payload.get("is_gift", False)
+        if not isinstance(is_gift, bool):
+            raise ValueError("历史记录中的赠送标记无效")
         return cls(
+            is_gift=is_gift,
             record_id=int(payload["record_id"]),
             event_name=str(payload["event_name"]),
             activity_id=str(payload["activity_id"]),
@@ -93,3 +99,20 @@ def get_gacha_history(
     return sort_gacha_history_records(
         [GachaHistoryRecord.from_payload(record) for record in records]
     )
+
+
+def get_passenger_state(client, current_user_url, login_token, activity_id, pool_name):
+    response = client.get(urljoin(current_user_url, 'get-passenger-state'),
+        headers=auth_headers(login_token), params={'activity_id': activity_id, 'pool_name': pool_name})
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict) or not isinstance(data.get('passengers'), dict):
+        raise ValueError('服务器返回的乘客状态无效')
+    for name, item in data['passengers'].items():
+        if (not isinstance(name, str) or not isinstance(item, dict)
+                or type(item.get('pulls')) is not int or item['pulls'] < 0
+                or type(item.get('has_gift')) is not bool):
+            raise ValueError('服务器返回的乘客状态项目无效')
+    if data.get('gift_operator') is not None and not isinstance(data['gift_operator'], str):
+        raise ValueError('服务器返回的赠送干员无效')
+    return data

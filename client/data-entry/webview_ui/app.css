@@ -74,7 +74,7 @@ input[type="checkbox"] { min-height: auto; accent-color: var(--client-accent-bac
 .menu-popover button { width: 100%; text-align: left; border: 0; background: var(--client-panel-background); }
 .menu-popover button:hover { background: var(--client-control-hover-background); }
 .menu-separator { border-top: 1px solid var(--client-border); margin: 4px; }
-.main-layout { display: grid; flex: 1 1 auto; min-height: 0; grid-template-columns: 225px minmax(0, 1fr); }
+.main-layout { display: grid; flex: 1 1 auto; min-height: 0; grid-template-columns: 300px minmax(0, 1fr); }
 .sidebar { display: flex; flex-direction: column; min-height: 0; margin: 16px 12px 16px 16px; padding: 14px; }
 .sidebar h2 { margin: 0 0 10px; font-size: 18px; }
 .passenger-list { overflow: auto; flex: 1; border: 1px solid var(--client-border); border-radius: 4px; }
@@ -149,3 +149,9 @@ tbody tr.selected { background: var(--client-selection-background); color: var(-
 .dialog-box { width: min(440px, calc(100vw - 30px)); padding: 18px; box-shadow: 0 8px 28px color-mix(in srgb, var(--client-text) 40%, transparent); }
 .dialog-box h2 { font-size: 17px; margin: 0 0 10px; }
 .dialog-box p { white-space: pre-wrap; line-height: 1.5; }
+
+.passenger-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1; min-height: 0; }
+.passenger-column { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.passenger-column h3 { font-size: 14px; margin: 0 0 8px; }
+.passenger-list button { overflow-wrap: anywhere; }
+#refresh-passengers { margin-top: 8px; }

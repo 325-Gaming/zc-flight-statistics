@@ -116,18 +116,22 @@ async function applyTheme(name) {
 }
 
 function renderMain() {
+  const previousPassenger = appElement.querySelector('[data-passenger].selected')?.dataset.passenger;
+  const scrollPositions = Object.fromEntries([...appElement.querySelectorAll('.passenger-list')]
+    .map(list => [list.dataset.group, list.scrollTop]));
   const s = state;
   const captain = s.captain;
   const captainTitle = captain ? `【${captain.title}】` : '资料暂不可用';
   const captainNickname = captain?.nickname || '';
-  const captainText = `机长 ${captainTitle}${captainNickname ? ` ${captainNickname}` : ''}`;
+  const role = s.role_label || '权限待确认';
+  const captainText = `${role} ${captainTitle}${captainNickname ? ` ${captainNickname}` : ''}`;
   const eventName = String(s.event_name ?? '').trim();
   const poolName = String(s.pool_name ?? '').trim();
   const currentFlight = formatEventNamePreview(eventName, poolName);
   const hasCurrentFlight = Boolean(eventName && poolName);
   const flightEventName = hasCurrentFlight ? `【${eventName}】` : '—';
   const menus = [
-    ['文件', [['设置', 'settings'], ['检查更新…', 'update'], ['导入乘客名单…', 'import'], [null], ['退出登录', 'logout'], ['退出', 'exit']]],
+    ['文件', [['设置', 'settings'], ['检查更新…', 'update'], ['编辑乘客名单…', 'import'], [null], ['退出登录', 'logout'], ['退出', 'exit']]],
     ['操作', [['撤销上一条', 'undo'], ['抽卡记录…', 'history']]],
     ['统计', [['直播页面设置…', 'page'], ['查看统计', 'statistics']]],
   ];
@@ -136,9 +140,16 @@ function renderMain() {
     <div class="menu-popover" id="menu-${index}" hidden>${items.map(([item, action]) =>
       item === null ? '<div class="menu-separator" role="separator"></div>' :
       `<button data-menu-action="${action}">${item}</button>`).join('')}</div></div>`).join('');
-  const passengers = s.passengers.map((name, index) =>
-    `<button data-passenger="${index}" class="${index === s.user_id ? 'selected' : ''}">${escapeHtml(name)}</button>`
-  ).join('');
+  const passengerGroups = {drawn: [], waiting: []};
+  s.passengers.forEach((name, index) => {
+    const pending = (s.pending_passengers || []).includes(name);
+    const group = (s.passenger_state?.[name]?.pulls || 0) > 0 ? 'drawn' : 'waiting';
+    passengerGroups[group].push(`<button data-passenger="${index}" class="${index === s.user_id ? 'selected' : ''}">${escapeHtml(name)}${pending ? ' · 待上传' : ''}</button>`);
+  });
+  const passengers = [['drawn', '已抽'], ['waiting', '未抽']].map(([group, label]) =>
+    `<section class="passenger-column"><h3>${label} (${passengerGroups[group].length})</h3><div class="passenger-list" data-group="${group}">${passengerGroups[group].join('')}</div></section>`).join('');
+  const giftInfo = s.passenger_state?.[s.nickname] || {};
+  const giftReady = s.gift_operator && !giftInfo.has_gift && !(s.pending_passengers || []).includes(s.nickname);
   const single = [3, 4, 5, 6].map(rarity =>
     `<button class="gacha-button" data-rarity="${rarity}"><strong>${'零一二三四五六'[rarity]}星</strong>
     <small>${escapeHtml(s.hotkeys[`hotkey_${rarity}x`] ? `快捷键 ${s.hotkeys[`hotkey_${rarity}x`]}` : '')}</small></button>`
@@ -151,7 +162,7 @@ function renderMain() {
           ${hasCurrentFlight ? `<span class="flight-pool">${escapeHtml(poolName)}</span>` : ''}</span>
       </div>
       <div class="captain-profile" title="${escapeHtml(captainText)}">
-        <span class="captain-label">机长</span>
+        <span class="captain-label">${escapeHtml(role)}</span>
         <span class="captain-details"><span class="captain-title">${escapeHtml(captainTitle)}</span>
           ${captainNickname ? `<span class="captain-nickname">${escapeHtml(captainNickname)}</span>` : ''}</span>
       </div>
@@ -160,7 +171,7 @@ function renderMain() {
         title="${s.page_is_active ? '关闭直播页面活跃刷新' : '开启直播页面活跃刷新'}">ON AIR</button>
     </div></div>
     <div class="main-layout"><aside class="sidebar panel"><h2>乘客列表</h2>
-      <div class="passenger-list">${passengers}</div></aside>
+      <div class="passenger-columns">${passengers}</div><button id="refresh-passengers">刷新名单状态</button></aside>
     <main class="main-panel"><div class="result-row"><div class="result">${escapeHtml(s.result)}</div>
       <label class="check-row overlay-switch">悬浮窗口 <input id="main-overlay" type="checkbox" ${s.show_result_overlay ? 'checked' : ''}></label></div>
       <div class="navigation"><button id="previous" ${s.user_id === 0 ? 'disabled' : ''}>上一位乘客${s.hotkeys.hotkey_previous_user ? `<br><small>${escapeHtml(s.hotkeys.hotkey_previous_user)}</small>` : ''}</button>
@@ -172,7 +183,22 @@ function renderMain() {
         <button class="gacha-button" id="purple"><strong>紫光镀彩</strong></button>
         <button class="gacha-button wide" id="ten"><strong>十连</strong>
         <small>${escapeHtml(s.hotkeys.hotkey_gacha10 ? `快捷键 ${s.hotkeys.hotkey_gacha10}` : '')}</small></button>
-      </div></fieldset><p class="status" role="status">${escapeHtml(s.status)}</p></main></div>`;
+      </div></fieldset><button id="gift" ${giftReady ? '' : 'disabled'} title="航空统计不足 300 抽时提示确认；每位乘客仅领取一次">添加300抽赠送${s.gift_operator ? `：${escapeHtml(s.gift_operator)}` : '当期限定'}</button><p class="status" role="status">${escapeHtml(s.status)}</p></main></div>`;
+  appElement.querySelectorAll('.passenger-list').forEach(list => {
+    list.scrollTop = scrollPositions[list.dataset.group] || 0;
+  });
+  if (previousPassenger !== String(s.user_id)) {
+    appElement.querySelector('[data-passenger].selected')?.scrollIntoView({block: 'nearest'});
+  }
+  document.getElementById('refresh-passengers').onclick = () => mainAction('refresh_passengers');
+  document.getElementById('gift').onclick = async () => {
+    const pulls = giftInfo.pulls || 0;
+    const warning = pulls < 300
+      ? `当前航空统计仅记录 ${pulls} 抽，不足 300 抽。乘客在活动开始前自行抽取的次数不计入航空统计，但可计入游戏领取条件。请确认已在游戏内领取赠送干员。\n\n`
+      : '';
+    if (await showDialog(pulls < 300 ? '航空统计不足 300 抽' : '添加赠送记录',
+      `${warning}为 ${s.nickname} 添加赠送的 ${s.gift_operator}？此记录不计入实际抽数。`, true)) await mainAction('gift');
+  };
   document.getElementById('main-overlay').onchange = async event => {
     const checkbox = event.target;
     checkbox.disabled = true;
@@ -256,7 +282,8 @@ async function mainAction(name, payload = {}) {
 function renderImport() {
   appElement.innerHTML = `<div class="content import-view">
     <label for="import-text">乘客名单（每行一位乘客）</label>
-    <textarea id="import-text" spellcheck="false"></textarea>
+    <textarea id="import-text" spellcheck="false">${escapeHtml((state.passengers || []).join('\n'))}</textarea>
+    <p class="muted">编辑当前名单，不会删除或改名历史记录；已有记录的乘客请保留原名。本次编辑仅在当前运行中生效。</p>
     <div class="actions"><button id="import-open-file">打开文件</button>
       <button id="import-cancel">取消</button><button id="import-confirm" class="primary">确定</button></div></div>`;
   const input = document.getElementById('import-text');
@@ -273,13 +300,19 @@ function renderImport() {
 }
 
 function renderHistory() {
+  const previousScroll = appElement.querySelector('.table-scroll');
+  const top = previousScroll?.scrollTop || 0;
+  const left = previousScroll?.scrollLeft || 0;
+  const filter = `${state.filter}:${state.nickname || state.current_nickname || ''}`;
+  const newest = String(state.rows.reduce((maximum, row) => Math.max(maximum, row.id), 0));
+  const follow = !previousScroll || previousScroll.dataset.filter !== filter || previousScroll.dataset.newest !== newest;
   const options = `<option value="current">当前乘客：${escapeHtml(state.current_nickname)}</option>
     <option value="all">全部乘客（当前活动）</option>` + state.passengers.map(name =>
     `<option value="passenger:${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   const rows = state.rows.map(row => `<tr data-id="${row.id}" class="${row.id === selectedRecord ? 'selected' : ''}">
     <td>${row.id}</td><td>${escapeHtml(row.nickname)}</td><td>${row.sequence}</td>
     <td>${escapeHtml(row.position)}</td><td>${escapeHtml(row.result)}</td>
-    <td>${escapeHtml(row.created_at)}</td><td>${row.revoked ? '已撤销' : '有效'}</td></tr>`).join('');
+    <td>${escapeHtml(row.created_at)}</td><td>${row.is_gift ? '赠送' : '—'}</td><td>${row.revoked ? '已撤销' : '有效'}</td></tr>`).join('');
   const selected = state.rows.find(row => row.id === selectedRecord);
   const siblings = selected ? state.rows.filter(row => row.nickname === selected.nickname)
     .sort((left, right) => left.sequence - right.sequence) : [];
@@ -287,7 +320,7 @@ function renderHistory() {
   appElement.innerHTML = `<div class="content history"><div class="toolbar"><label for="history-filter">查看范围：</label>
     <select id="history-filter">${options}</select><button id="history-refresh">刷新</button></div>
     <div class="table-scroll"><table><thead><tr><th>记录 ID</th><th>乘客</th><th>记录序号</th><th>抽数</th>
-    <th>抽卡结果</th><th>上传时间</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <th>抽卡结果</th><th>上传时间</th><th>赠送标记</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="history-footer"><span class="status">${escapeHtml(state.history_status || `共 ${state.rows.length} 条记录`)}</span>
       <span>将所选记录：</span><button id="revoke" ${state.pending || !selected || selected.revoked ? 'disabled' : ''}>撤销</button>
       <button id="restore" ${state.pending || !selected || !selected.revoked ? 'disabled' : ''}>恢复</button>
@@ -296,6 +329,10 @@ function renderHistory() {
       <button data-move="next" ${state.pending || selectedIndex < 0 || selectedIndex >= siblings.length - 1 ? 'disabled' : ''}>与后一条交换位置</button>
       <button data-move="last" ${state.pending || selectedIndex < 0 || selectedIndex >= siblings.length - 1 ? 'disabled' : ''}>移至最后</button>
       <button id="history-close">关闭</button></div></div>`;
+  const scroll = appElement.querySelector('.table-scroll');
+  scroll.dataset.filter = filter;
+  scroll.dataset.newest = newest;
+  scroll.scrollTo(left, follow ? scroll.scrollHeight : top);
   document.getElementById('history-filter').value = state.filter === 'passenger'
     ? `passenger:${state.nickname}` : state.filter;
   document.getElementById('history-filter').onchange = async event => {
@@ -415,7 +452,7 @@ function renderPage() {
     <input type="checkbox" id="page-${key}" ${s[key] ? 'checked' : ''}>${escapeHtml(label)}</label>`;
   const fields = data.text_items.map(([key, label]) =>
     `<label for="page-${key}">${escapeHtml(label)}</label><input id="page-${key}" value="${escapeHtml(s[key])}">`).join('');
-  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><p class="muted">正在编辑：${escapeHtml(data.live_id || '默认活动')}</p><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
+  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><p class="muted">正在编辑：${escapeHtml(`${data.live_name}(${data.live_id || '旧版默认'})`)}</p><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
     ${escapeHtml(data.activity[1])}</label><div class="form-grid">
     <label for="page-poll_interval_seconds">数据轮询间隔（秒）</label>
     <input type="number" id="page-poll_interval_seconds" min="1" max="60" value="${s.poll_interval_seconds}">
@@ -452,6 +489,7 @@ function renderStatistics(previewLiveId = state.live_id) {
   const data = state;
   const options = data.live_list.map(row => `<option value="${escapeHtml(row.live_id)}">${escapeHtml(row.name)}${row.is_enabled ? '' : '（已停用）'}</option>`).join('');
   const activityOptions = data.activity_list.map(item => `<option value="${escapeHtml(item.activity_id)}">${escapeHtml(item.name)}（${item.role === 'captain' ? '机长' : '乘务员'}）</option>`).join('');
+  const poolOptions = data.pool_names.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   appElement.innerHTML = `<div class="content">
     <div class="form-grid"><label for="statistics-live-id">直播配置</label>
     <select id="statistics-live-id"><option value="">默认活动（随服务端切换）</option>${options}</select></div>
@@ -462,7 +500,7 @@ function renderStatistics(previewLiveId = state.live_id) {
     <form id="live-form" class="form-grid">
       <label for="live-name">配置名称</label><input id="live-name" required maxlength="128">
       <label for="live-activity">航空活动</label><select id="live-activity" required>${activityOptions}</select>
-      <label for="live-pool">卡池名称</label><input id="live-pool" required maxlength="128">
+      <label for="live-pool">卡池名称</label><select id="live-pool" required>${poolOptions}</select>
       <label for="live-follow">跟随操作员账号编号</label><input id="live-follow" type="number" required min="1" step="1">
       <label for="live-passenger">固定乘客</label><input id="live-passenger" maxlength="64" placeholder="留空则跟随指定操作员当前选择的乘客">
       <label class="check-row wide"><input id="live-enabled" type="checkbox" checked>启用直播配置</label>
@@ -476,6 +514,7 @@ function renderStatistics(previewLiveId = state.live_id) {
   const select = document.getElementById('statistics-live-id');
   const urlInput = document.getElementById('statistics-url');
   const copyButton = document.getElementById('copy-url');
+  const defaultButton = document.getElementById('live-default');
   select.value = data.live_list.some(row => row.live_id === previewLiveId) ? previewLiveId : '';
   const updateSelection = () => {
     const url = new URL(data.url);
@@ -495,6 +534,10 @@ function renderStatistics(previewLiveId = state.live_id) {
     const activity = row && data.activity_list.find(item => item.activity_id === row.activity_id);
     document.getElementById('live-remove').disabled = !row || (row.owner_id !== data.operator_id && activity?.role !== 'captain');
     document.getElementById('live-grant').disabled = !row || row.owner_id !== data.operator_id;
+    if (defaultButton) {
+      defaultButton.textContent = select.value ? '设为默认活动' : '清除默认活动';
+      defaultButton.disabled = !select.value && !data.default_live_id;
+    }
     document.getElementById('live-target').textContent = `客户端当前配置：${data.live_id || '默认活动'}；录入活动：${data.event_name}` + (row && row.event_name !== data.event_name ? '。注意：所选直播活动与当前录入活动不同。' : '');
   };
   select.onchange = updateSelection;
@@ -527,7 +570,7 @@ function renderStatistics(previewLiveId = state.live_id) {
   };
   document.getElementById('live-refresh').onclick = () => perform('refresh');
   document.getElementById('live-use').onclick = () => perform('select', {live_id: select.value});
-  if (data.is_admin) document.getElementById('live-default').onclick = () => perform('default', {values: {live_id: select.value}});
+  if (defaultButton) defaultButton.onclick = () => perform('default', {values: {live_id: select.value}});
   const save = (action) => {
     if (!document.getElementById('live-form').reportValidity()) return;
     const values = {

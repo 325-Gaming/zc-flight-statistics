@@ -71,6 +71,10 @@ def get_page_display_settings(http_client, url, login_token, *, live_id=""):
         if not isinstance(data["live_id"], str):
             raise ValueError("服务器返回的直播配置 ID 无效")
         settings["live_id"] = data["live_id"]
+    if "live_name" in data:
+        if not isinstance(data["live_name"], str):
+            raise ValueError("服务器返回的直播配置名称无效")
+        settings["live_name"] = data["live_name"]
     return settings
 
 

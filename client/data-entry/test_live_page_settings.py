@@ -11,6 +11,38 @@ from test_webview_profile import WebViewProfileTests
 
 
 class LivePageSettingsTests(unittest.TestCase):
+    def test_statistics_uses_server_pool_list_for_dropdown(self):
+        module = WebViewProfileTests._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.live_id = ''
+        app.activity_list = []
+        module.core.client = object()
+        module.core.login_token = 'test-token'
+        module.core.set_current_user_api_url = 'https://example.test/set-current-user'
+        module.core.get_pool_list_api_url = 'https://example.test/get-pool-list'
+        module.core.statistics_page_url = 'https://example.test/live'
+        module.core.activity_id = 'activity'
+        module.core.event_name = '活动'
+        module.core.pool_name = '当前卡池'
+        with patch.object(module, 'request_live_page', return_value={
+            'live_list': [], 'operator_id': 1, 'is_admin': False,
+            'default_live_id': '',
+        }), patch.object(module, 'get_page_pool_settings', return_value={
+            'current_pool_name': '当前卡池',
+            'pool_name_list': ('新卡池', '当前卡池'),
+        }) as get_pool_list:
+            state = app._statistics_state()
+        self.assertEqual(state['pool_names'], ('新卡池', '当前卡池'))
+        get_pool_list.assert_called_once_with(
+            module.core.client, module.core.get_pool_list_api_url, 'test-token',
+        )
+
+        script = (pathlib.Path(__file__).parent / 'webview_ui/app.js').read_text(
+            encoding='utf-8',
+        )
+        self.assertIn('<select id="live-pool" required>${poolOptions}</select>', script)
+        self.assertNotIn('<input id="live-pool"', script)
+
     def test_management_uses_existing_origin_and_encodes_id(self):
         requests = []
         def handler(request):
@@ -109,9 +141,12 @@ class LivePageSettingsTests(unittest.TestCase):
         app.startup_complete = True
         app.logged_out = False
         app.live_id = 'one'
+        app.windows = {}
+        app._emit_main = Mock()
         app._statistics_state = Mock(return_value={'live_list': [], 'live_id': ''})
         module.core.client = object()
         module.core.login_token = 'test-token'
+        module.core.get_page_display_api_url = 'https://example.test/get-page-display'
         module.core.set_current_user_api_url = 'https://example.test/set-current-user'
         with tempfile.TemporaryDirectory() as folder:
             path = pathlib.Path(folder) / 'config.json'
@@ -120,7 +155,9 @@ class LivePageSettingsTests(unittest.TestCase):
             module.core.config = {'live_id': 'one', 'event_name': '活动'}
             with patch.object(module, 'request_live_page', return_value={
                 'status': 'success', 'live_id': 'one',
-            }) as request:
+            }) as request, patch.object(module, 'get_page_display_settings', return_value={
+                'page_style': 'classic', 'is_active': True,
+            }) as get_settings:
                 result = app.action('statistics', 'remove', {
                     'live_id': 'one', 'values': {'live_id': 'one'},
                 })
@@ -129,6 +166,84 @@ class LivePageSettingsTests(unittest.TestCase):
             self.assertEqual(module.core.config['live_id'], '')
             self.assertEqual(json.loads(path.read_text())['live_id'], '')
             self.assertEqual(request.call_args.args[-1], 'remove-live')
+            self.assertEqual(get_settings.call_args.kwargs, {})
+            self.assertTrue(app.page_is_active)
+            app._emit_main.assert_called_once_with()
+
+    def test_default_changes_sync_main_only_when_following_server(self):
+        for selected_id in ('', 'pinned'):
+            for default_id in ('one', ''):
+                with self.subTest(selected_id=selected_id, default_id=default_id):
+                    module = WebViewProfileTests._load_app_module()
+                    app = module.WebViewApp.__new__(module.WebViewApp)
+                    app.logged_out = False
+                    app.live_id = selected_id
+                    app.page_is_active = False
+                    app.windows = {'main': object()}
+                    app._emit = Mock()
+                    app._emit_main = Mock()
+                    app._statistics_state = Mock(return_value={})
+                    module.core.client = object()
+                    module.core.login_token = 'test-token'
+                    module.core.set_current_user_api_url = 'https://example.test/set-current-user'
+                    module.core.get_page_display_api_url = 'https://example.test/get-page-display'
+                    with patch.object(module, 'request_live_page', return_value={
+                        'status': 'success', 'live_id': default_id,
+                    }), patch.object(module, 'get_page_display_settings', return_value={
+                        'page_style': 'custom', 'is_active': True,
+                    }) as get_settings:
+                        app.action('statistics', 'default', {'values': {'live_id': default_id}})
+                    if selected_id:
+                        get_settings.assert_not_called()
+                        app._emit_main.assert_not_called()
+                        self.assertFalse(app.page_is_active)
+                    else:
+                        self.assertEqual(get_settings.call_args.kwargs, {})
+                        self.assertTrue(app.page_is_active)
+                        app._emit.assert_called_once_with('main', {'theme': 'custom'})
+                        app._emit_main.assert_called_once_with()
+
+    def test_refresh_syncs_selected_configuration_and_propagates_failure(self):
+        module = WebViewProfileTests._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.logged_out = False
+        app.live_id = 'one'
+        app.page_is_active = False
+        app.windows = {}
+        app._emit_main = Mock()
+        app._statistics_state = Mock(return_value={'live_id': 'one'})
+        module.core.client = object()
+        module.core.login_token = 'test-token'
+        module.core.get_page_display_api_url = 'https://example.test/get-page-display'
+        with patch.object(module, 'get_page_display_settings', return_value={
+            'page_style': 'classic', 'is_active': True,
+        }) as get_settings:
+            self.assertEqual(app.action('statistics', 'refresh', {}), {'live_id': 'one'})
+        self.assertEqual(get_settings.call_args.kwargs, {'live_id': 'one'})
+        self.assertTrue(app.page_is_active)
+        app._emit_main.assert_called_once_with()
+        app._emit_main.reset_mock()
+        with patch.object(module, 'get_page_display_settings', side_effect=httpx.ConnectError('offline')):
+            with self.assertRaises(httpx.ConnectError):
+                app.action('statistics', 'refresh', {})
+        self.assertTrue(app.page_is_active)
+        app._emit_main.assert_not_called()
+
+    def test_saved_default_reports_sync_failure_and_allows_refresh(self):
+        module = WebViewProfileTests._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.logged_out = False
+        app.live_id = ''
+        module.core.client = object()
+        module.core.login_token = 'test-token'
+        module.core.set_current_user_api_url = 'https://example.test/set-current-user'
+        module.core.get_page_display_api_url = 'https://example.test/get-page-display'
+        with patch.object(module, 'request_live_page', return_value={
+            'status': 'success', 'live_id': 'one',
+        }) as request, patch.object(module, 'get_page_display_settings', side_effect=httpx.ConnectError('offline')):
+            with self.assertRaisesRegex(RuntimeError, '操作已保存.*刷新状态或列表失败.*请刷新列表'):
+                app.action('statistics', 'default', {'values': {'live_id': 'one'}})
+        request.assert_called_once()
 
 
 if __name__ == '__main__':
