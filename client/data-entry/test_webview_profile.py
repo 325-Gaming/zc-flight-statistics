@@ -26,7 +26,12 @@ class WebViewProfileTests(unittest.TestCase):
     def test_selected_nickname_uses_personal_center_fields(self):
         module = self._load_app_module()
         info = {
-            "status": "success", "permission_code_list": ["zc.flight_user"],
+            "status": "success",
+            "permission_list": [{
+                "permission_code": "zc_flight_captain",
+                "has_global_scope": False,
+                "scope_value_list": ["11111111-1111-1111-1111-111111111111"],
+            }],
             "user_id": 123, "title_adj": "资深", "title_title": "机长",
             "nickname": "arknights_nickname_clear",
             "bilibili": {"nickname": "哔哩昵称"},

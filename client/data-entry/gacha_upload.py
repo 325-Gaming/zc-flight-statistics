@@ -11,7 +11,8 @@ from flight_session import auth_headers
 
 @dataclass(frozen=True)
 class GachaUploadTask:
-    event_name: str
+    activity_id: str
+    pool_name: str
     nickname: str
     count: int
     gacha_index: int
@@ -21,14 +22,16 @@ class GachaUploadTask:
 
 @dataclass(frozen=True)
 class GachaStateTask:
-    event_name: str
+    activity_id: str
+    pool_name: str
     record_id: int
     is_revoked: bool
 
 
 @dataclass(frozen=True)
 class GachaMoveTask:
-    event_name: str
+    activity_id: str
+    pool_name: str
     record_id: int
     action: str
 
@@ -74,14 +77,16 @@ class GachaUploadQueue:
 
     def submit(
         self,
-        event_name,
+        activity_id,
+        pool_name,
         nickname,
         count,
         gacha_index,
         character_list,
     ):
         task = GachaUploadTask(
-            event_name=event_name,
+            activity_id=activity_id,
+            pool_name=pool_name,
             nickname=nickname,
             count=count,
             gacha_index=gacha_index,
@@ -91,35 +96,38 @@ class GachaUploadQueue:
         self._put(task)
         return task
 
-    def restore(self, event_name, record_id):
+    def restore(self, activity_id, pool_name, record_id):
         if self.restore_url is None:
             raise RuntimeError("恢复接口尚未配置")
         task = GachaStateTask(
-            event_name=event_name,
+            activity_id=activity_id,
+            pool_name=pool_name,
             record_id=record_id,
             is_revoked=False,
         )
         self._put(task)
         return task
 
-    def revoke(self, event_name, record_id):
+    def revoke(self, activity_id, pool_name, record_id):
         if self.revoke_url is None:
             raise RuntimeError("撤销接口尚未配置")
         task = GachaStateTask(
-            event_name=event_name,
+            activity_id=activity_id,
+            pool_name=pool_name,
             record_id=record_id,
             is_revoked=True,
         )
         self._put(task)
         return task
 
-    def move(self, event_name, record_id, action):
+    def move(self, activity_id, pool_name, record_id, action):
         if self.move_url is None:
             raise RuntimeError("记录排序接口尚未配置")
         if action not in {"first", "last", "previous", "next"}:
             raise ValueError("不支持的记录排序操作")
         task = GachaMoveTask(
-            event_name=event_name,
+            activity_id=activity_id,
+            pool_name=pool_name,
             record_id=record_id,
             action=action,
         )
@@ -167,7 +175,8 @@ class GachaUploadQueue:
                 if isinstance(task, GachaUploadTask):
                     url = self.url
                     payload = {
-                        "event_name": task.event_name,
+                        "activity_id": task.activity_id,
+                        "pool_name": task.pool_name,
                         "nickname": task.nickname,
                         "count": task.count,
                         "gacha_index": task.gacha_index,
@@ -180,13 +189,15 @@ class GachaUploadQueue:
                 elif isinstance(task, GachaStateTask):
                     url = self.revoke_url if task.is_revoked else self.restore_url
                     payload = {
-                        "event_name": task.event_name,
+                        "activity_id": task.activity_id,
+                        "pool_name": task.pool_name,
                         "record_id": task.record_id,
                     }
                 else:
                     url = self.move_url
                     payload = {
-                        "event_name": task.event_name,
+                        "activity_id": task.activity_id,
+                        "pool_name": task.pool_name,
                         "record_id": task.record_id,
                         "action": task.action,
                     }

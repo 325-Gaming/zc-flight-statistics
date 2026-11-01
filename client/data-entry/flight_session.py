@@ -93,9 +93,28 @@ def get_login_info(session, *, client=None):
 
 
 def has_flight_permission(data):
-    return (isinstance(data, dict) and data.get('status') == 'success'
-            and isinstance(data.get('permission_code_list', []), list)
-            and 'zc.flight_user' in data.get('permission_code_list', []))
+    if not isinstance(data, dict) or data.get('status') != 'success':
+        return False
+    permission_list = data.get('permission_list')
+    if not isinstance(permission_list, list) or any(
+        not isinstance(permission, dict)
+        or not isinstance(permission.get('permission_code'), str)
+        or not permission['permission_code']
+        or not isinstance(permission.get('has_global_scope'), bool)
+        or not isinstance(permission.get('scope_value_list'), list)
+        or any(
+            not isinstance(scope_value, str) or not scope_value
+            for scope_value in permission['scope_value_list']
+        )
+        or not (permission['has_global_scope'] or permission['scope_value_list'])
+        for permission in permission_list
+    ):
+        return False
+    return any(
+        permission['permission_code'] in {'zc_flight_captain', 'zc_flight_crew'}
+        and bool(permission['scope_value_list'])
+        for permission in permission_list
+    )
 
 
 def logout(session, *, client=None):

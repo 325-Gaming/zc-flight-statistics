@@ -342,13 +342,14 @@ function settingsField(key, label, description, control) {
 function renderSettings() {
   const data = state;
   const config = data.config;
+  const activityOptions = data.activities.map(item => `<option value="${escapeHtml(item.activity_id)}">${escapeHtml(item.name)}（${item.role === 'captain' ? '机长' : '乘务员'}）</option>`).join('');
   const poolOptions = data.pool_names.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   const monitorOptions = data.monitors.map(monitor =>
     `<option value="${monitor.index}">${escapeHtml(monitor.description)}（${monitor.size.join('×')}，${monitor.position.join(', ')}）</option>`
   ).join('');
   const textInput = (key, value) => `<input id="setting-${key}" value="${escapeHtml(value)}">`;
   const fields = [
-    settingsField('event_name', '活动名称', '基础活动名称，会与卡池名称拼接后提交抽卡记录。', textInput('event_name', config.event_name)),
+    settingsField('activity_id', '航空活动', '活动名称由机长在个人中心管理。', `<select id="setting-activity_id">${activityOptions}</select>`),
     settingsField('pool_name', '卡池名称', '', `<select id="setting-pool_name">${poolOptions}</select>`),
     settingsField('user_name_list_file', '乘客名单文件', '相对于程序目录；更换后会替换当前乘客列表。', textInput('user_name_list_file', config.user_name_list_file)),
     '<p class="wide muted" id="event-preview"></p>',
@@ -363,14 +364,16 @@ function renderSettings() {
   appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><div class="form-grid">${fields.join('')}</div></div>
     <div class="actions form-view-actions"><button id="settings-cancel">取消</button><button id="settings-save" class="primary">保存</button></div></div>`;
   document.getElementById('setting-pool_name').value = data.selected_pool;
+  document.getElementById('setting-activity_id').value = config.activity_id;
   document.getElementById('setting-target_monitor_id').value = String(config.target_monitor_id);
   const updatePreview = () => {
-    const eventName = document.getElementById('setting-event_name').value.trim();
+    const activitySelector = document.getElementById('setting-activity_id');
+    const eventName = activitySelector.options[activitySelector.selectedIndex]?.text.replace(/（(?:机长|乘务员)）$/, '') || '';
     const poolName = document.getElementById('setting-pool_name').value.trim();
     document.getElementById('event-preview').textContent =
       `完整活动名称预览：${formatEventNamePreview(eventName, poolName)}\n${data.pool_message || ''}`;
   };
-  document.getElementById('setting-event_name').oninput = updatePreview;
+  document.getElementById('setting-activity_id').onchange = updatePreview;
   document.getElementById('setting-pool_name').onchange = updatePreview;
   updatePreview();
   appElement.querySelectorAll('[data-clear]').forEach(button => button.onclick = () => {
@@ -394,7 +397,7 @@ function renderSettings() {
   document.getElementById('settings-cancel').onclick = () => api('close');
   document.getElementById('settings-save').onclick = async () => {
     const values = {show_result_overlay: document.getElementById('setting-show_result_overlay').checked};
-    for (const key of ['event_name', 'pool_name', 'target_monitor_id', 'user_name_list_file',
+    for (const key of ['activity_id', 'pool_name', 'target_monitor_id', 'user_name_list_file',
       'hotkey_gacha10', 'hotkey_3x', 'hotkey_4x', 'hotkey_5x', 'hotkey_6x', 'hotkey_previous_user', 'hotkey_next_user']) {
       values[key] = document.getElementById(`setting-${key}`).value.trim();
     }
@@ -448,6 +451,7 @@ function renderPage() {
 function renderStatistics(previewLiveId = state.live_id) {
   const data = state;
   const options = data.live_list.map(row => `<option value="${escapeHtml(row.live_id)}">${escapeHtml(row.name)}${row.is_enabled ? '' : '（已停用）'}</option>`).join('');
+  const activityOptions = data.activity_list.map(item => `<option value="${escapeHtml(item.activity_id)}">${escapeHtml(item.name)}（${item.role === 'captain' ? '机长' : '乘务员'}）</option>`).join('');
   appElement.innerHTML = `<div class="content">
     <div class="form-grid"><label for="statistics-live-id">直播配置</label>
     <select id="statistics-live-id"><option value="">默认活动（随服务端切换）</option>${options}</select></div>
@@ -457,14 +461,14 @@ function renderStatistics(previewLiveId = state.live_id) {
     <p id="live-target" class="muted"></p>
     <form id="live-form" class="form-grid">
       <label for="live-name">配置名称</label><input id="live-name" required maxlength="128">
-      <label for="live-event">完整活动名称</label><input id="live-event" required maxlength="128">
+      <label for="live-activity">航空活动</label><select id="live-activity" required>${activityOptions}</select>
       <label for="live-pool">卡池名称</label><input id="live-pool" required maxlength="128">
       <label for="live-follow">跟随操作员账号编号</label><input id="live-follow" type="number" required min="1" step="1">
       <label for="live-passenger">固定乘客</label><input id="live-passenger" maxlength="64" placeholder="留空则跟随指定操作员当前选择的乘客">
       <label class="check-row wide"><input id="live-enabled" type="checkbox" checked>启用直播配置</label>
     </form>
-    <p class="muted">你的操作员账号编号：${data.operator_id}。活动总统计汇总该活动全部录入记录；配置名称可以不同，完整活动名称必须与录入活动一致。</p>
-    <div class="actions"><button id="live-create">创建独立配置</button><button id="live-save">保存所选配置</button></div>
+    <p class="muted">你的操作员账号编号：${data.operator_id}。直播统计只读取配置指定操作员在所选活动和卡池中上传的记录。</p>
+    <div class="actions"><button id="live-create">创建独立配置</button><button id="live-save">保存所选配置</button><button id="live-remove">移除所选配置</button></div>
     <div class="form-grid"><label for="live-editors">授权操作员账号编号</label><input id="live-editors" placeholder="以英文逗号分隔；留空移除全部授权"></div>
     <div class="actions"><button id="live-grant">保存授权（仅创建者）</button></div>
     <p class="muted">选择配置并点击“用于本客户端”后，“直播页面设置”和 ON AIR 会操作该配置。创建新配置时复制当前全局显示设置，之后各配置独立保存。</p>
@@ -480,13 +484,16 @@ function renderStatistics(previewLiveId = state.live_id) {
     urlInput.value = url.href;
     copyButton.textContent = '点击复制';
     const row = data.live_list.find(item => item.live_id === select.value);
-    const values = row || {name: data.event_name, event_name: data.event_name, pool_name: data.pool_name, follow_operator_id: data.operator_id, fixed_nickname: '', is_enabled: true};
-    for (const [field, key] of [['name', 'name'], ['event', 'event_name'], ['pool', 'pool_name'], ['follow', 'follow_operator_id'], ['passenger', 'fixed_nickname']]) {
+    const values = row || {name: data.event_name, activity_id: data.activity_id, pool_name: data.pool_name, follow_operator_id: data.operator_id, fixed_nickname: '', is_enabled: true};
+    for (const [field, key] of [['name', 'name'], ['activity', 'activity_id'], ['pool', 'pool_name'], ['follow', 'follow_operator_id'], ['passenger', 'fixed_nickname']]) {
       document.getElementById(`live-${field}`).value = values[key] ?? '';
     }
     document.getElementById('live-enabled').checked = values.is_enabled;
     document.getElementById('live-editors').value = row ? row.editor_id_list.join(',') : '';
-    document.getElementById('live-save').disabled = !row;
+    const canEdit = row && (row.owner_id === data.operator_id || row.editor_id_list.includes(data.operator_id));
+    document.getElementById('live-save').disabled = !canEdit;
+    const activity = row && data.activity_list.find(item => item.activity_id === row.activity_id);
+    document.getElementById('live-remove').disabled = !row || (row.owner_id !== data.operator_id && activity?.role !== 'captain');
     document.getElementById('live-grant').disabled = !row || row.owner_id !== data.operator_id;
     document.getElementById('live-target').textContent = `客户端当前配置：${data.live_id || '默认活动'}；录入活动：${data.event_name}` + (row && row.event_name !== data.event_name ? '。注意：所选直播活动与当前录入活动不同。' : '');
   };
@@ -525,7 +532,7 @@ function renderStatistics(previewLiveId = state.live_id) {
     if (!document.getElementById('live-form').reportValidity()) return;
     const values = {
       name: document.getElementById('live-name').value.trim(),
-      event_name: document.getElementById('live-event').value.trim(),
+      activity_id: document.getElementById('live-activity').value,
       pool_name: document.getElementById('live-pool').value.trim(),
       follow_operator_id: Number(document.getElementById('live-follow').value),
       fixed_nickname: document.getElementById('live-passenger').value.trim() || null,
@@ -535,6 +542,10 @@ function renderStatistics(previewLiveId = state.live_id) {
   };
   document.getElementById('live-create').onclick = () => save('create');
   document.getElementById('live-save').onclick = () => save('save');
+  document.getElementById('live-remove').onclick = async () => {
+    if (!select.value || !(await showDialog('移除直播配置', '确定移除所选直播配置吗？原链接将立即失效，抽卡记录不会删除。', true))) return;
+    return perform('remove', {live_id: select.value, values: {live_id: select.value}});
+  };
   document.getElementById('live-form').onsubmit = event => event.preventDefault();
   document.getElementById('live-grant').onclick = async () => {
     const text = document.getElementById('live-editors').value.trim();

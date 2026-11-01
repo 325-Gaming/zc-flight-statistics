@@ -23,6 +23,12 @@ def _load_app_module():
     fake_core._version_number = "2.3.0"
     fake_core.BASE_DIR = BASE_DIR
     fake_core.user_name_list = ["乘客1"]
+    activity = {
+        "activity_id": "11111111-1111-1111-1111-111111111111",
+        "name": "测试航空活动",
+        "role": "captain",
+    }
+    fake_core.select_flight_activity = lambda: ([activity], activity)
     fake_core.request_set_current_user = lambda _nickname: True
     fake_webview = types.ModuleType("webview")
     module_path = BASE_DIR / "webview_app.py"
@@ -351,6 +357,22 @@ class WebViewGateTests(unittest.TestCase):
 
 
 class GateStyleTests(unittest.TestCase):
+    def test_gate_page_scrolls_as_a_whole_when_content_exceeds_window(self):
+        css = (BASE_DIR / "webview_ui/gate.css").read_text(encoding="utf-8")
+        blocks = dict(re.findall(r"([^{}]+)\{([^{}]*)\}", css))
+        rules = {selector.strip(): body for selector, body in blocks.items()}
+
+        app_rule = rules["html.dark.gate-page #app"]
+        self.assertIn("display: flex", app_rule)
+        self.assertIn("overflow-y: auto", app_rule)
+        scrollbar_rule = rules["html.dark.gate-page #app::-webkit-scrollbar-thumb"]
+        self.assertIn("background: var(--gate-border)", scrollbar_rule)
+        gate_rule = rules["html.dark.gate-page .content.gate-view"]
+        self.assertIn("flex: 0 0 auto", gate_rule)
+        self.assertIn("margin: auto 0", gate_rule)
+        self.assertIn("overflow: visible", gate_rule)
+        self.assertNotIn("max-height", gate_rule)
+
     def test_dialog_dark_styles_are_local_and_cover_all_interaction_states(self):
         css = (BASE_DIR / "webview_ui/gate.css").read_text(encoding="utf-8")
         blocks = dict(re.findall(r"([^{}]+)\{([^{}]*)\}", css))

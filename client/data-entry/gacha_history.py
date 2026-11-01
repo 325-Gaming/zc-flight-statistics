@@ -7,6 +7,9 @@ from flight_session import auth_headers
 class GachaHistoryRecord:
     record_id: int
     event_name: str
+    activity_id: str
+    operator_id: int
+    pool_name: str
     nickname: str
     sequence_no: int
     count: int
@@ -25,6 +28,9 @@ class GachaHistoryRecord:
         return cls(
             record_id=int(payload["record_id"]),
             event_name=str(payload["event_name"]),
+            activity_id=str(payload["activity_id"]),
+            operator_id=int(payload["operator_id"]),
+            pool_name=str(payload["pool_name"]),
             nickname=str(payload["nickname"]),
             sequence_no=int(payload["sequence_no"]),
             count=int(payload["count"]),
@@ -64,10 +70,11 @@ def get_gacha_history(
     client,
     url,
     login_token,
-    event_name,
+    activity_id,
+    pool_name,
     nickname=None,
 ):
-    params = {"event_name": event_name}
+    params = {"activity_id": activity_id, "pool_name": pool_name}
     if nickname:
         params["nickname"] = nickname
     response = client.get(

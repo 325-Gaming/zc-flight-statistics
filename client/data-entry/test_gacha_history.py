@@ -9,6 +9,8 @@ from gacha_history import (
     sort_gacha_history_records,
 )
 
+ACTIVITY_ID = "11111111-1111-1111-1111-111111111111"
+
 
 class GachaHistoryTests(unittest.TestCase):
     def test_formats_single_and_ten_pull_positions(self):
@@ -21,6 +23,9 @@ class GachaHistoryTests(unittest.TestCase):
             return GachaHistoryRecord(
                 record_id=record_id,
                 event_name="event",
+                activity_id=ACTIVITY_ID,
+                operator_id=1,
+                pool_name="pool",
                 nickname=nickname,
                 sequence_no=sequence_no,
                 count=1,
@@ -56,6 +61,9 @@ class GachaHistoryTests(unittest.TestCase):
                         {
                             "record_id": 7,
                             "event_name": "event",
+                            "activity_id": ACTIVITY_ID,
+                            "operator_id": 1,
+                            "pool_name": "pool",
                             "nickname": "user",
                             "sequence_no": 3,
                             "count": 1,
@@ -73,11 +81,14 @@ class GachaHistoryTests(unittest.TestCase):
                 client,
                 "https://example.test/history",
                 "token",
-                "event",
+                ACTIVITY_ID,
+                "pool",
                 nickname="user",
             )
 
-        self.assertEqual(requested_params, [{"event_name": "event", "nickname": "user"}])
+        self.assertEqual(requested_params, [{
+            "activity_id": ACTIVITY_ID, "pool_name": "pool", "nickname": "user",
+        }])
         self.assertEqual(records[0].record_id, 7)
         self.assertEqual(records[0].sequence_no, 3)
         self.assertEqual(records[0].character_list, ("六星干员",))
@@ -94,10 +105,11 @@ class GachaHistoryTests(unittest.TestCase):
                 client,
                 "https://example.test/history",
                 "token",
-                "event",
+                ACTIVITY_ID,
+                "pool",
             )
 
-        self.assertEqual(requested_params, [{"event_name": "event"}])
+        self.assertEqual(requested_params, [{"activity_id": ACTIVITY_ID, "pool_name": "pool"}])
 
     def test_rejects_invalid_response(self):
         with httpx.Client(
@@ -110,7 +122,8 @@ class GachaHistoryTests(unittest.TestCase):
                     client,
                     "https://example.test/history",
                     "token",
-                    "event",
+                    ACTIVITY_ID,
+                    "pool",
                 )
 
 

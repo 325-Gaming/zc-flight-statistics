@@ -6,6 +6,8 @@ import httpx
 
 from gacha_upload import GachaMoveTask, GachaStateTask, GachaUploadQueue
 
+ACTIVITY_ID = "11111111-1111-1111-1111-111111111111"
+
 
 class GachaUploadQueueTests(unittest.TestCase):
     def test_uploads_tasks_in_order_without_images(self):
@@ -17,8 +19,8 @@ class GachaUploadQueueTests(unittest.TestCase):
 
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             upload_queue = GachaUploadQueue(client, "https://example.test", "token")
-            upload_queue.submit("event", "user", 1, 1, ["三星干员"])
-            upload_queue.submit("event", "user", 1, 2, ["四星干员"])
+            upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 1, ["三星干员"])
+            upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 2, ["四星干员"])
             upload_queue.close()
 
         self.assertEqual([request["gacha_index"] for request in requests], [1, 2])
@@ -42,7 +44,7 @@ class GachaUploadQueueTests(unittest.TestCase):
                 max_attempts=2,
                 retry_delay=0,
             )
-            upload_queue.submit("event", "user", 1, 1, ["三星干员"])
+            upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 1, ["三星干员"])
             upload_queue.close()
 
         self.assertEqual(len(set(request_ids)), 1)
@@ -61,13 +63,13 @@ class GachaUploadQueueTests(unittest.TestCase):
                 "token",
                 move_url="https://example.test/move-record",
             )
-            task = upload_queue.move("event", 13, "last")
+            task = upload_queue.move(ACTIVITY_ID, "pool", 13, "last")
             upload_queue.close()
 
         self.assertIsInstance(task, GachaMoveTask)
         self.assertEqual(
             requests,
-            [{"event_name": "event", "record_id": 13, "action": "last"}],
+            [{"activity_id": ACTIVITY_ID, "pool_name": "pool", "record_id": 13, "action": "last"}],
         )
 
     def test_queues_revoke_and_restore_in_order(self):
@@ -85,8 +87,8 @@ class GachaUploadQueueTests(unittest.TestCase):
                 revoke_url="https://example.test/revoke",
                 restore_url="https://example.test/restore",
             )
-            revoked = upload_queue.revoke("event", 12)
-            restored = upload_queue.restore("event", 12)
+            revoked = upload_queue.revoke(ACTIVITY_ID, "pool", 12)
+            restored = upload_queue.restore(ACTIVITY_ID, "pool", 12)
             upload_queue.close()
 
         self.assertIsInstance(revoked, GachaStateTask)
@@ -117,8 +119,8 @@ class GachaUploadQueueTests(unittest.TestCase):
                 retry_delay=0,
                 on_failure=lambda task, error: failures.append(task.gacha_index),
             )
-            upload_queue.submit("event", "user", 1, 1, ["三星干员"])
-            upload_queue.submit("event", "user", 1, 2, ["四星干员"])
+            upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 1, ["三星干员"])
+            upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 2, ["四星干员"])
             upload_queue.close()
 
         self.assertEqual(attempts, [1, 1, 2])
@@ -129,7 +131,7 @@ class GachaUploadQueueTests(unittest.TestCase):
             upload_queue = GachaUploadQueue(client, "https://example.test", "token")
             upload_queue.close()
             with self.assertRaisesRegex(RuntimeError, "已经关闭"):
-                upload_queue.submit("event", "user", 1, 1, [])
+                upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 1, [])
 
     def test_bounded_shutdown_when_upload_is_blocked(self):
         started = threading.Event()
@@ -145,7 +147,7 @@ class GachaUploadQueueTests(unittest.TestCase):
                 client, "https://example.test", "token", daemon=True,
             )
             try:
-                upload_queue.submit("event", "user", 1, 1, ["三星干员"])
+                upload_queue.submit(ACTIVITY_ID, "pool", "user", 1, 1, ["三星干员"])
                 self.assertTrue(started.wait(timeout=1))
                 self.assertFalse(upload_queue.close(wait=True, timeout=0.01))
             finally:

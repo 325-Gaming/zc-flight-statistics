@@ -34,6 +34,7 @@ from tkinter import filedialog, messagebox, ttk
 from event_settings import compose_event_name
 from flight_session import auth_headers, load_session
 from hotkeys import register_hotkeys
+from live_page_settings import request_live_page
 from page_display_settings import (
     PAGE_ACTIVITY_ITEM,
     PAGE_DISPLAY_ITEMS,
@@ -97,6 +98,7 @@ with open(CONFIG_PATH, 'r', encoding='utf-8') as config_file:
     config = json.load(config_file)
 target_monitor_id = int(config['target_monitor_id'])
 event_name = str(config['event_name']).strip()
+activity_id = str(config.get('activity_id', '')).strip()
 pool_name = str(config['pool_name']).strip()
 user_name_list_file = config['user_name_list_file']
 hotkey_gacha10 = config['hotkey_gacha10']
@@ -177,6 +179,35 @@ statistics_page_url = "https://yubo.run/zc/zc-flight-live.html?zcnb=zcnb"
 
 
 client = httpx.Client(http2=True, timeout=15.0)
+
+
+def select_flight_activity():
+    global activity_id, event_name
+    data = request_live_page(
+        client, set_current_user_api_url, login_token, 'get-activity-list',
+    )
+    activity_list = data['activity_list']
+    if not activity_list:
+        raise RuntimeError('当前账号没有可操作的Zc航空活动')
+    selected = next(
+        (item for item in activity_list if item['activity_id'] == activity_id),
+        activity_list[0],
+    )
+    activity_id = selected['activity_id']
+    event_name = selected['name']
+    if (
+        config.get('activity_id') != activity_id
+        or config.get('event_name') != event_name
+    ):
+        config['activity_id'] = activity_id
+        config['event_name'] = event_name
+        temporary = CONFIG_PATH.with_suffix('.json.tmp')
+        temporary.write_text(
+            json.dumps(config, ensure_ascii=False, indent=4) + '\n',
+            encoding='utf-8',
+        )
+        temporary.replace(CONFIG_PATH)
+    return activity_list, selected
 
 class MultiMonitorCapture:
     def __init__(self):
@@ -337,7 +368,8 @@ def request_set_current_user(nickname):
             headers=auth_headers(login_token),
             json={
                 "nickname": nickname,
-                "event_name": compose_event_name(event_name, pool_name),
+                "activity_id": activity_id,
+                "pool_name": pool_name,
             },
         )
         res.raise_for_status()
@@ -452,7 +484,9 @@ class SimpleApp:
                     str(BASE_DIR / 'favicon.png')
                 )
                 NSApplication.sharedApplication().setApplicationIconImage_(dock_icon)
-        self.event_name = event_name
+        self.activity_list, selected_activity = select_flight_activity()
+        self.activity_id = selected_activity['activity_id']
+        self.event_name = selected_activity['name']
         self.pool_name = pool_name
         self.user_name_list = list(user_name_list)
         self.user_id = -1
@@ -1067,7 +1101,8 @@ class SimpleApp:
                 client,
                 gacha_history_api_url,
                 login_token,
-                self.full_event_name,
+                self.activity_id,
+                self.pool_name,
                 nickname=nickname,
             )
         except (httpx.HTTPError, RuntimeError, ValueError) as request_error:
@@ -1193,10 +1228,14 @@ class SimpleApp:
         ):
             return
         if is_revoked:
-            self.upload_queue.revoke(self.full_event_name, record.record_id)
+            self.upload_queue.revoke(
+                self.activity_id, self.pool_name, record.record_id,
+            )
             action = "撤销"
         else:
-            self.upload_queue.restore(self.full_event_name, record.record_id)
+            self.upload_queue.restore(
+                self.activity_id, self.pool_name, record.record_id,
+            )
             action = "恢复"
         self.history_status_label.configure(text=f"{action}操作已加入队列…")
         self.history_revoke_button.configure(state=tk.DISABLED)
@@ -1213,7 +1252,9 @@ class SimpleApp:
         record = self.history_records.get(int(selection[0]))
         if record is None:
             return
-        self.upload_queue.move(self.full_event_name, record.record_id, action)
+        self.upload_queue.move(
+            self.activity_id, self.pool_name, record.record_id, action,
+        )
         action_labels = {
             "first": "移至最前",
             "last": "移至最后",
@@ -1260,7 +1301,8 @@ class SimpleApp:
                 client,
                 gacha_history_api_url,
                 login_token,
-                self.full_event_name,
+                self.activity_id,
+                self.pool_name,
                 nickname=nickname,
             )
         except (httpx.HTTPError, RuntimeError, ValueError) as request_error:
@@ -1312,7 +1354,9 @@ class SimpleApp:
             f"确定撤销 {nickname} 最近上传的 {record.count} 抽记录吗？",
         ):
             return
-        self.upload_queue.revoke(self.full_event_name, record.record_id)
+        self.upload_queue.revoke(
+            self.activity_id, self.pool_name, record.record_id,
+        )
 
     def open_page_display_settings(self):
         window = self.page_display_settings_window
@@ -1810,7 +1854,18 @@ class SimpleApp:
 
         pool_name_list = pool_settings["pool_name_list"]
         current_pool_name = pool_settings["current_pool_name"]
-        configured_event_name = str(current_config.get("event_name", "")).strip()
+        configured_activity_id = str(current_config.get("activity_id", "")).strip()
+        activity_by_label = {
+            f"{item['name']}（{'机长' if item['role'] == 'captain' else '乘务员'}）": item
+            for item in self.activity_list
+        }
+        selected_activity_label = next(
+            (
+                label for label, item in activity_by_label.items()
+                if item['activity_id'] == configured_activity_id
+            ),
+            next(iter(activity_by_label), ''),
+        )
         configured_pool_name = str(current_config.get("pool_name", "")).strip()
         selected_pool_name = select_initial_pool_name(
             configured_pool_name,
@@ -1823,9 +1878,9 @@ class SimpleApp:
 
         settings = (
             (
-                "event_name",
-                "活动名称",
-                "基础活动名称，会与卡池名称拼接后提交抽卡记录。",
+                "activity_id",
+                "航空活动",
+                "活动名称由机长在个人中心管理。",
             ),
             (
                 "pool_name",
@@ -1856,9 +1911,9 @@ class SimpleApp:
         content.columnconfigure(1, weight=1)
         entries = {}
         settings_variables = {
-            "event_name": tk.StringVar(
+            "activity_id": tk.StringVar(
                 master=window,
-                value=configured_event_name,
+                value=selected_activity_label,
             ),
             "pool_name": tk.StringVar(
                 master=window,
@@ -1867,7 +1922,7 @@ class SimpleApp:
             "event_preview": tk.StringVar(master=window),
         }
         window.settings_variables = settings_variables
-        event_name_variable = settings_variables["event_name"]
+        activity_variable = settings_variables["activity_id"]
         pool_name_variable = settings_variables["pool_name"]
         event_preview_variable = settings_variables["event_preview"]
         for index, (key, label, description) in enumerate(settings):
@@ -1884,13 +1939,15 @@ class SimpleApp:
                 )
                 pool_selector.grid(row=row, column=1, sticky="ew", pady=6)
                 entries[key] = pool_selector
-            elif key == "event_name":
-                event_name_entry = ttk.Entry(
+            elif key == "activity_id":
+                activity_selector = ttk.Combobox(
                     content,
-                    textvariable=event_name_variable,
+                    textvariable=activity_variable,
+                    values=list(activity_by_label),
+                    state="readonly",
                 )
-                event_name_entry.grid(row=row, column=1, sticky="ew", pady=6)
-                entries[key] = event_name_entry
+                activity_selector.grid(row=row, column=1, sticky="ew", pady=6)
+                entries[key] = activity_selector
             elif key == "target_monitor_id":
                 monitor_row = ttk.Frame(content)
                 monitor_row.grid(row=row, column=1, sticky="ew", pady=6)
@@ -1954,9 +2011,10 @@ class SimpleApp:
 
         def update_event_preview(*_args):
             selected_pool_name = entries["pool_name"].get().strip()
+            activity = activity_by_label.get(entries["activity_id"].get())
             try:
                 full_event_name = compose_event_name(
-                    entries["event_name"].get(),
+                    activity["name"] if activity else "",
                     selected_pool_name,
                 )
             except ValueError:
@@ -1972,7 +2030,7 @@ class SimpleApp:
                 preview_text += f"\n{pool_sync_message}"
             event_preview_variable.set(preview_text)
 
-        event_name_variable.trace_add("write", update_event_preview)
+        activity_variable.trace_add("write", update_event_preview)
         pool_name_variable.trace_add("write", update_event_preview)
         update_event_preview()
 
@@ -2008,6 +2066,7 @@ class SimpleApp:
                 entries,
                 window,
                 current_pool_name,
+                activity_by_label,
             ),
         ).pack(side=tk.LEFT)
 
@@ -2088,7 +2147,8 @@ class SimpleApp:
         preview_label.pack(padx=12, pady=12)
         preview_window.transient(parent)
 
-    def save_settings(self, entries, window, current_pool_name):
+    def save_settings(self, entries, window, current_pool_name, activity_by_label):
+        global activity_id
         global event_name
         global hotkey_3x
         global hotkey_4x
@@ -2110,11 +2170,17 @@ class SimpleApp:
             )
             for key, entry in entries.items()
         }
+        selected_activity = activity_by_label.get(values["activity_id"])
+        if selected_activity is None:
+            messagebox.showwarning("无法保存", "请选择当前账号可操作的航空活动。", parent=window)
+            return
+        values["activity_id"] = selected_activity["activity_id"]
+        values["event_name"] = selected_activity["name"]
         if values["show_result_overlay"] and sys.platform != "win32":
             messagebox.showwarning("无法保存", "识别结果悬浮窗口目前仅支持 Windows", parent=window)
             return
         required_keys = (
-            "event_name",
+            "activity_id",
             "pool_name",
             "target_monitor_id",
             "user_name_list_file",
@@ -2122,7 +2188,7 @@ class SimpleApp:
         if any(values[key] is None or values[key] == "" for key in required_keys):
             messagebox.showwarning(
                 "无法保存",
-                "活动名称、卡池名称、显示器和乘客名单文件必须填写。",
+                "航空活动、卡池名称、显示器和乘客名单文件必须填写。",
                 parent=window,
             )
             return
@@ -2246,6 +2312,7 @@ class SimpleApp:
             messagebox.showerror("保存失败", detail, parent=window)
             return
 
+        activity_id = values["activity_id"]
         event_name = values["event_name"]
         pool_name = values["pool_name"]
         target_monitor_id = values["target_monitor_id"]
@@ -2261,6 +2328,7 @@ class SimpleApp:
         config.clear()
         config.update(updated_config)
         self.event_name = event_name
+        self.activity_id = activity_id
         self.pool_name = pool_name
         self.hotkey_listener = new_listener
         self.settings_window = None
@@ -2605,7 +2673,8 @@ class SimpleApp:
     def enqueue_gacha_result(self, count, character_list):
         gacha_index = self.gacha_index
         self.upload_queue.submit(
-            event_name=self.full_event_name,
+            activity_id=self.activity_id,
+            pool_name=self.pool_name,
             nickname=self.entry_nickname.get(),
             count=count,
             gacha_index=gacha_index,

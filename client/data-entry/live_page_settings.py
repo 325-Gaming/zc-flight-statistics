@@ -30,7 +30,7 @@ def request_live_page(http_client, current_user_url, login_token, action, *, liv
         for row in data["live_list"]:
             if (
                 not isinstance(row, dict)
-                or not all(isinstance(row.get(key), str) for key in ("live_id", "name", "event_name", "pool_name"))
+                or not all(isinstance(row.get(key), str) for key in ("live_id", "name", "activity_id", "event_name", "pool_name"))
                 or not all(isinstance(row.get(key), int) and not isinstance(row.get(key), bool) and row[key] > 0 for key in ("owner_id", "follow_operator_id"))
                 or not isinstance(row.get("is_enabled"), bool)
                 or not isinstance(row.get("editor_id_list"), list)
@@ -38,4 +38,14 @@ def request_live_page(http_client, current_user_url, login_token, action, *, liv
                 or (row.get("fixed_nickname") is not None and not isinstance(row["fixed_nickname"], str))
             ):
                 raise ValueError("服务器返回的直播配置列表项目无效")
+    elif action == "get-activity-list":
+        if data.get("status") != "success" or not isinstance(data.get("activity_list"), list):
+            raise ValueError("服务器返回的航空活动列表格式不正确")
+        for row in data["activity_list"]:
+            if (
+                not isinstance(row, dict)
+                or not all(isinstance(row.get(key), str) and row[key] for key in ("activity_id", "name", "role"))
+                or row["role"] not in {"captain", "crew"}
+            ):
+                raise ValueError("服务器返回的航空活动列表项目无效")
     return data

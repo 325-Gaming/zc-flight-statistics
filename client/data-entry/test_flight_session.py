@@ -39,11 +39,40 @@ class FlightSessionTests(unittest.TestCase):
 
     def test_missing_permission_clears_previous_result(self):
         self.assertTrue(has_flight_permission({
-            'status': 'success', 'permission_code_list': ['zc.flight_user'],
+            'status': 'success',
+            'permission_list': [{
+                'permission_code': 'zc_flight_captain',
+                'has_global_scope': False,
+                'scope_value_list': ['11111111-1111-1111-1111-111111111111'],
+            }],
         }))
         self.assertFalse(has_flight_permission({'status': 'success'}))
         self.assertFalse(has_flight_permission({
-            'status': 'success', 'permission_code_list': [],
+            'status': 'success', 'permission_list': [],
+        }))
+        self.assertFalse(has_flight_permission({
+            'status': 'success',
+            'permission_list': [{
+                'permission_code': 'zc_flight_captain',
+                'has_global_scope': True,
+                'scope_value_list': [],
+            }],
+        }))
+        self.assertFalse(has_flight_permission({
+            'status': 'success',
+            'permission_list': [{
+                'permission_code': 'zc.flight_user',
+                'has_global_scope': False,
+                'scope_value_list': [],
+            }],
+        }))
+        self.assertFalse(has_flight_permission({
+            'status': 'success',
+            'permission_list': [{
+                'permission_code': 'zc.flight_user',
+                'has_global_scope': False,
+                'scope_value_list': [''],
+            }],
         }))
 
     def test_request_headers_and_logout_protocol(self):
@@ -54,8 +83,14 @@ class FlightSessionTests(unittest.TestCase):
         seen = []
         def handler(request):
             seen.append((request.url.path, request.read()))
-            return httpx.Response(200, json={'status': 'success',
-                                              'permission_code_list': ['zc.flight_user']})
+            return httpx.Response(200, json={
+                'status': 'success',
+                'permission_list': [{
+                    'permission_code': 'zc_flight_crew',
+                    'has_global_scope': False,
+                    'scope_value_list': ['11111111-1111-1111-1111-111111111111'],
+                }],
+            })
         with tempfile.TemporaryDirectory() as temporary:
             with httpx.Client(transport=httpx.MockTransport(handler)) as client:
                 with patch('flight_session.LOGIN_INFO_URL', 'https://example.test/api/kusa/get-login-info'), \

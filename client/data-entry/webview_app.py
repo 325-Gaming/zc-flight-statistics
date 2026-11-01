@@ -191,6 +191,7 @@ class WebViewApp:
         self.page_is_active = False
         self.available_styles = (DEFAULT_PAGE_STYLE,)
         self.live_id = str(core.config.get("live_id", "")).strip()
+        self.activity_list = []
         self.upload_queue = GachaUploadQueue(
             core.client, core.submit_gacha_log_api_url, core.login_token,
             move_url=core.move_gacha_log_api_url,
@@ -254,7 +255,8 @@ class WebViewApp:
             if not nickname:
                 raise ValueError("当前乘客昵称不能为空")
             self.upload_queue.submit(
-                event_name=self.full_event_name,
+                activity_id=core.activity_id,
+                pool_name=core.pool_name,
                 nickname=nickname,
                 count=count,
                 gacha_index=index,
@@ -658,6 +660,7 @@ class WebViewApp:
         )
         return {
             "config": config,
+            "activities": list(self.activity_list),
             "pool_names": pool["pool_name_list"],
             "current_pool": pool["current_pool_name"],
             "selected_pool": selected_pool,
@@ -687,6 +690,8 @@ class WebViewApp:
         )
         return {
             **data, "url": core.statistics_page_url, "live_id": self.live_id,
+            "activity_id": core.activity_id,
+            "activity_list": list(self.activity_list),
             "event_name": self.full_event_name, "pool_name": core.pool_name,
         }
 
@@ -694,7 +699,7 @@ class WebViewApp:
         nickname = self.nickname if self.history_filter == "current" else self.history_nickname
         records = get_gacha_history(
             core.client, core.gacha_history_api_url, core.login_token,
-            self.full_event_name, nickname=nickname,
+            core.activity_id, core.pool_name, nickname=nickname,
         )
         self.history_records = {record.record_id: record for record in records}
         positions = {}
@@ -730,10 +735,17 @@ class WebViewApp:
         }
 
     def _save_settings(self, values):
-        required = ("event_name", "pool_name", "user_name_list_file")
+        required = ("activity_id", "pool_name", "user_name_list_file")
         if any(not str(values.get(key, "")).strip() for key in required):
-            raise ValueError("活动名称、卡池名称和乘客名单文件必须填写")
-        compose_event_name(values["event_name"], values["pool_name"])
+            raise ValueError("航空活动、卡池名称和乘客名单文件必须填写")
+        activity = next(
+            (item for item in self.activity_list if item["activity_id"] == values["activity_id"]),
+            None,
+        )
+        if activity is None:
+            raise ValueError("航空活动不存在或当前账号已失去权限")
+        values = {**values, "event_name": activity["name"]}
+        compose_event_name(activity["name"], values["pool_name"])
         monitor_id = int(values["target_monitor_id"])
         if not 0 <= monitor_id < len(core.capture.monitors):
             raise ValueError("显示器编号无效")
@@ -766,7 +778,8 @@ class WebViewApp:
         temporary.replace(core.CONFIG_PATH)
         core.config.clear()
         core.config.update(updated)
-        core.event_name = values["event_name"]
+        core.activity_id = values["activity_id"]
+        core.event_name = activity["name"]
         core.pool_name = values["pool_name"]
         self.last_synced_user = None
         core.target_monitor_id = monitor_id
@@ -981,19 +994,21 @@ class WebViewApp:
             elif name == "undo":
                 records = get_gacha_history(
                     core.client, core.gacha_history_api_url, core.login_token,
-                    self.full_event_name, nickname=self.nickname,
+                    core.activity_id, core.pool_name, nickname=self.nickname,
                 )
                 record = next((item for item in reversed(records) if not item.is_revoked), None)
                 if record is None:
                     raise ValueError(f"{self.nickname} 没有可撤销的抽卡记录")
                 if int(payload.get("id", -1)) != record.record_id:
                     raise ValueError("最近记录已变化，请重新确认")
-                self.upload_queue.revoke(self.full_event_name, record.record_id)
+                self.upload_queue.revoke(
+                    core.activity_id, core.pool_name, record.record_id,
+                )
                 self._set_status("撤销操作已加入队列")
             elif name == "undo_preview":
                 records = get_gacha_history(
                     core.client, core.gacha_history_api_url, core.login_token,
-                    self.full_event_name, nickname=self.nickname,
+                    core.activity_id, core.pool_name, nickname=self.nickname,
                 )
                 record = next((item for item in reversed(records) if not item.is_revoked), None)
                 if record is None:
@@ -1044,13 +1059,13 @@ class WebViewApp:
                 try:
                     if name == "move":
                         self.upload_queue.move(
-                            self.full_event_name, record_id, payload["direction"],
+                            core.activity_id, core.pool_name, record_id, payload["direction"],
                         )
                     elif record.is_revoked == (name == "revoke"):
                         raise ValueError("记录状态已变化，请刷新后重试")
                     else:
                         (self.upload_queue.revoke if name == "revoke" else self.upload_queue.restore)(
-                            self.full_event_name, record_id,
+                            core.activity_id, core.pool_name, record_id,
                         )
                 except Exception:
                     self.history_pending = False
@@ -1119,12 +1134,27 @@ class WebViewApp:
                     self._emit(target, {"theme": self.page_style})
                 self._emit_main()
                 return self._statistics_state()
-            actions = {"create": "create-live", "save": "set-live", "editors": "set-live-editor", "default": "set-default-live"}
+            actions = {
+                "create": "create-live", "save": "set-live",
+                "editors": "set-live-editor", "default": "set-default-live",
+                "remove": "remove-live",
+            }
             if name in actions:
                 result = request_live_page(
                     core.client, core.set_current_user_api_url, core.login_token, actions[name],
                     live_id=payload.get("live_id", ""), payload=payload["values"],
                 )
+                if name == "remove" and self.live_id == payload.get("live_id"):
+                    self.live_id = ""
+                    core.config["live_id"] = ""
+                    with core.CONFIG_PATH.open(encoding="utf-8") as config_file:
+                        config = json.load(config_file)
+                    config["live_id"] = ""
+                    temporary = core.CONFIG_PATH.with_suffix(".json.tmp")
+                    with temporary.open("w", encoding="utf-8") as config_file:
+                        json.dump(config, config_file, ensure_ascii=False, indent=4)
+                        config_file.write("\n")
+                    temporary.replace(core.CONFIG_PATH)
                 try:
                     state = self._statistics_state()
                 except (httpx.HTTPError, ValueError) as error:
@@ -1138,6 +1168,7 @@ class WebViewApp:
     def _enter_client(self):
         main_window = None
         try:
+            self.activity_list, _ = core.select_flight_activity()
             nickname = self.nickname
             if nickname != self.last_synced_user:
                 if not core.request_set_current_user(nickname):

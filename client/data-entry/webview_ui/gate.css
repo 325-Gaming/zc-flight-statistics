@@ -17,16 +17,31 @@ html.dark.gate-page body {
 }
 
 html.dark.gate-page #app {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 14px;
+  scrollbar-color: var(--gate-border) var(--gate-background);
+}
+
+html.dark.gate-page #app::-webkit-scrollbar {
+  background: var(--gate-background);
+}
+
+html.dark.gate-page #app::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: var(--gate-border);
 }
 
 html.dark.gate-page .content.gate-view {
+  flex: 0 0 auto;
   width: 100%;
   max-width: 560px;
   height: auto;
-  max-height: 100%;
+  margin: auto 0;
+  overflow: visible;
   padding: 22px 26px;
   border: 1px solid var(--gate-border);
   background:

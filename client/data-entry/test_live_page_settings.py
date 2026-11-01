@@ -28,6 +28,35 @@ class LivePageSettingsTests(unittest.TestCase):
             with self.assertRaises(httpx.HTTPStatusError):
                 request_live_page(client, 'https://example.test/set-current-user', 'test-token', 'get-live-list')
 
+    def test_activity_list_requires_scoped_role_data(self):
+        valid = {
+            'status': 'success',
+            'activity_list': [{
+                'activity_id': '11111111-1111-1111-1111-111111111111',
+                'name': '测试活动',
+                'role': 'captain',
+            }],
+        }
+        with httpx.Client(transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=valid)
+        )) as client:
+            self.assertEqual(
+                request_live_page(
+                    client, 'https://example.test/set-current-user', 'test-token',
+                    'get-activity-list',
+                ),
+                valid,
+            )
+        invalid = {**valid, 'activity_list': [{**valid['activity_list'][0], 'role': 'admin'}]}
+        with httpx.Client(transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=invalid)
+        )) as client:
+            with self.assertRaisesRegex(ValueError, '活动列表项目无效'):
+                request_live_page(
+                    client, 'https://example.test/set-current-user', 'test-token',
+                    'get-activity-list',
+                )
+
     def test_select_persists_live_id_and_protects_open_settings_window(self):
         module = WebViewProfileTests._load_app_module()
         app = module.WebViewApp.__new__(module.WebViewApp)
@@ -73,6 +102,33 @@ class LivePageSettingsTests(unittest.TestCase):
         self.assertEqual(get_settings.call_args.kwargs, {'live_id': 'one'})
         self.assertEqual(set_settings.call_args.kwargs, {'live_id': 'one'})
         self.assertEqual(set_settings.call_args.args[-1], {'is_active': True, 'other': 'preserved'})
+
+    def test_remove_selected_live_clears_persisted_selection(self):
+        module = WebViewProfileTests._load_app_module()
+        app = module.WebViewApp.__new__(module.WebViewApp)
+        app.startup_complete = True
+        app.logged_out = False
+        app.live_id = 'one'
+        app._statistics_state = Mock(return_value={'live_list': [], 'live_id': ''})
+        module.core.client = object()
+        module.core.login_token = 'test-token'
+        module.core.set_current_user_api_url = 'https://example.test/set-current-user'
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / 'config.json'
+            path.write_text('{"live_id": "one", "event_name": "活动"}')
+            module.core.CONFIG_PATH = path
+            module.core.config = {'live_id': 'one', 'event_name': '活动'}
+            with patch.object(module, 'request_live_page', return_value={
+                'status': 'success', 'live_id': 'one',
+            }) as request:
+                result = app.action('statistics', 'remove', {
+                    'live_id': 'one', 'values': {'live_id': 'one'},
+                })
+            self.assertEqual(result['result']['live_id'], 'one')
+            self.assertEqual(app.live_id, '')
+            self.assertEqual(module.core.config['live_id'], '')
+            self.assertEqual(json.loads(path.read_text())['live_id'], '')
+            self.assertEqual(request.call_args.args[-1], 'remove-live')
 
 
 if __name__ == '__main__':
