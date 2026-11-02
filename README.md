@@ -216,22 +216,24 @@ cp client/data-entry/.env.example client/data-entry/.env
 
 `.env` 已被 Git 忽略。升级时可删除其中旧的 `ZCFLIGHT_LOGIN_TOKEN`；新客户端不会读取它。不要将个人中心会话或其他真实凭据写入配置模板、源码或提交历史。
 
+业务接口现按 `/zc-flight/{gachalog,activity,live,pool,model}/...` 分类，外部地址加 `/api`；旧 `/gachalog-zc/...` 不再注册。升级时须同步调整服务端、代理与自定义 URL，并重启客户端。`ZCFLIGHT_CURRENT_USER_URL` 保持 `/zc-flight/gachalog/set-current-user` 目录结构，活动与直播配置接口会从其上级目录派生。服务端抽卡表与模型同步统一为 `t_zc_flight_gacha_log` / `ZcFlightGachaLog`、`t_zc_flight_gacha_log_state` / `ZcFlightGachaLogState`，已有数据库须先完成表与索引重命名迁移再启动新版服务。详见 [服务端部署说明](server/deployment.md)。
+
 开发或自托管环境还可以在 `.env` 中覆盖以下接口地址：
 
 ```dotenv
 ZCFLIGHT_LOGIN_INFO_URL=http://localhost:8000/api/kusa/get-login-info
 ZCFLIGHT_LOGOUT_URL=http://localhost:8000/api/kusa/logout
-ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/gachalog-zc/get-model-manifest
-ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/gachalog-zc/set-current-user
-ZCFLIGHT_GET_POOL_LIST_URL=http://localhost:8000/api/gachalog-zc/get-pool-list
-ZCFLIGHT_SET_CURRENT_POOL_URL=http://localhost:8000/api/gachalog-zc/set-current-pool
-ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/get-page-display
-ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/gachalog-zc/set-page-display
-ZCFLIGHT_GET_PAGE_STYLE_LIST_URL=http://localhost:8000/api/gachalog-zc/get-page-style-list
-ZCFLIGHT_GACHA_HISTORY_URL=http://localhost:8000/api/gachalog-zc/history
-ZCFLIGHT_MOVE_GACHA_URL=http://localhost:8000/api/gachalog-zc/move-record
-ZCFLIGHT_REVOKE_GACHA_URL=http://localhost:8000/api/gachalog-zc/revoke
-ZCFLIGHT_RESTORE_GACHA_URL=http://localhost:8000/api/gachalog-zc/restore
+ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/zc-flight/model/get-manifest
+ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/zc-flight/gachalog/set-current-user
+ZCFLIGHT_GET_POOL_LIST_URL=http://localhost:8000/api/zc-flight/pool/get-list
+ZCFLIGHT_SET_CURRENT_POOL_URL=http://localhost:8000/api/zc-flight/pool/set-current
+ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/zc-flight/live/get-page-display
+ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/zc-flight/live/set-page-display
+ZCFLIGHT_GET_PAGE_STYLE_LIST_URL=http://localhost:8000/api/zc-flight/live/get-page-style-list
+ZCFLIGHT_GACHA_HISTORY_URL=http://localhost:8000/api/zc-flight/gachalog/history
+ZCFLIGHT_MOVE_GACHA_URL=http://localhost:8000/api/zc-flight/gachalog/move-record
+ZCFLIGHT_REVOKE_GACHA_URL=http://localhost:8000/api/zc-flight/gachalog/revoke
+ZCFLIGHT_RESTORE_GACHA_URL=http://localhost:8000/api/zc-flight/gachalog/restore
 ```
 
 #### 运行配置
@@ -381,4 +383,6 @@ Windows 默认显示识别结果悬浮窗口，已有开关状态保持不变。
 
 限定卡池的当前乘客可添加一次在游戏内领取的 300 抽赠送当期限定干员。航空统计不足 300 抽时仅警告，确认乘客已在游戏内领取后仍可添加；活动开始前自行抽取的次数不补入航空统计。赠送占用一条记录序号，在历史表格中标记为“赠送”，实际抽数为 0，不影响六星水位、概率、平均抽数和统计极值；它参与记分板的累计获取计数。赠送可撤销、恢复和调整位置；航空统计不足 300 抽不限制恢复赠送，也不限制撤销实际抽卡。重排后累计获取角标随记录顺序重算。
 
-升级顺序：先执行 gachabot 的 `migrations/20261101_zc_flight_gift.sql`，再更新并重启服务端，然后更新直播页，最后更新客户端。该迁移只新增 `is_gift` 列，已有记录默认保持实际抽卡；不要重复执行。新客户端依赖新增的 `get-passenger-state` 接口。客户端版本和最低支持版本本轮不变，正式发布时再确定版本。
+升级顺序：已有数据库先核对活动作用域与赠送迁移是否完成，再按 gachabot 的 `migrations/20261103_zc_flight_gacha_log_rename.md` 完成表与索引重命名，之后协调部署服务端、代理、直播页和客户端。赠送迁移新增 `is_gift` 列，重命名迁移保留现有数据；已完成的迁移不要重复执行。新客户端依赖 `/zc-flight/gachalog/get-passenger-state` 等新路径。
+
+本轮仅提交源码，暂不发布 data-entry 新版本；版本号保留 `2.5.0`，最低支持版本不变，不创建发布标签。已发布客户端仍调用旧 API，因此本轮提交不代表可以直接切换生产服务端或代理；应等待兼容客户端就绪，或先明确旧路径兼容方案，再安排上线。

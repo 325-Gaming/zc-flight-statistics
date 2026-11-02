@@ -6,7 +6,17 @@ from flight_session import auth_headers
 
 
 def request_live_page(http_client, current_user_url, login_token, action, *, live_id="", payload=None):
-    url = urljoin(current_user_url, action)
+    # The configured passenger URL owns the origin and any proxy prefix.
+    path = {
+        "get-activity-list": "../activity/get-list",
+        "get-live-list": "../live/get-list",
+        "create-live": "../live/create",
+        "set-live": "../live/set",
+        "set-live-editor": "../live/set-editor",
+        "remove-live": "../live/remove",
+        "set-default-live": "../live/set-default",
+    }[action]
+    url = urljoin(current_user_url, path)
     kwargs = {"headers": auth_headers(login_token)}
     if live_id:
         kwargs["params"] = {"live_id": live_id}

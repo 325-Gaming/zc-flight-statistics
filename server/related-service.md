@@ -12,8 +12,8 @@
 | `/zc/zc-flight-live.html` | OBS 等浏览器环境使用的直播统计页 |
 | `/zc/css/zc-flight-live/` | 共享主题 CSS |
 | `/assets/arknights/operator-avatars/operator-avatars.json` | 直播页干员头像清单 |
-| `/api/gachalog-zc/get` | 直播页公开统计数据 |
-| `/api/gachalog-zc/get-page-style-list` | 直播页与客户端可用主题目录 |
+| `/api/zc-flight/gachalog/get` | 直播页公开统计数据 |
+| `/api/zc-flight/live/get-page-style-list` | 直播页与客户端可用主题目录 |
 
 直播页 URL 使用 `live_id` 选择配置，活动、卡池和跟随操作员由服务端决定。页面按服务端的活跃状态与间隔轮询；不活跃时仍以较长间隔检查状态。客户端 ON AIR 控制所选配置的刷新状态，不代表 OBS 推流状态或账户在线状态。
 

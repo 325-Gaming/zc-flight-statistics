@@ -129,53 +129,53 @@ print('当前活动 {}'.format(compose_event_name(event_name, pool_name)))
 model_image_type_path = BASE_DIR / 'models/image_type.onnx'
 model_gacha10_path = BASE_DIR / 'models/gacha10.onnx'
 
-submit_gacha_log_api_url = 'https://yubo.run/api/gachalog-zc/submit'
+submit_gacha_log_api_url = 'https://yubo.run/api/zc-flight/gachalog/submit'
 set_current_user_api_url = os.getenv(
     'ZCFLIGHT_CURRENT_USER_URL',
-    'https://yubo.run/api/gachalog-zc/set-current-user',
+    'https://yubo.run/api/zc-flight/gachalog/set-current-user',
 )
 get_pool_list_api_url = os.getenv(
     'ZCFLIGHT_GET_POOL_LIST_URL',
-    'https://yubo.run/api/gachalog-zc/get-pool-list',
+    'https://yubo.run/api/zc-flight/pool/get-list',
 )
 set_current_pool_api_url = os.getenv(
     'ZCFLIGHT_SET_CURRENT_POOL_URL',
-    'https://yubo.run/api/gachalog-zc/set-current-pool',
+    'https://yubo.run/api/zc-flight/pool/set-current',
 )
 model_manifest_api_url = os.getenv(
     'ZCFLIGHT_MODEL_MANIFEST_URL',
-    'https://yubo.run/api/gachalog-zc/get-model-manifest',
+    'https://yubo.run/api/zc-flight/model/get-manifest',
 )
 get_page_display_api_url = os.getenv(
     'ZCFLIGHT_GET_PAGE_DISPLAY_URL',
-    'https://yubo.run/api/gachalog-zc/get-page-display',
+    'https://yubo.run/api/zc-flight/live/get-page-display',
 )
 set_page_display_api_url = os.getenv(
     'ZCFLIGHT_SET_PAGE_DISPLAY_URL',
-    'https://yubo.run/api/gachalog-zc/set-page-display',
+    'https://yubo.run/api/zc-flight/live/set-page-display',
 )
 get_page_style_list_api_url = os.getenv(
     'ZCFLIGHT_GET_PAGE_STYLE_LIST_URL',
-    'https://yubo.run/api/gachalog-zc/get-page-style-list',
+    'https://yubo.run/api/zc-flight/live/get-page-style-list',
 )
 gacha_history_api_url = os.getenv(
     'ZCFLIGHT_GACHA_HISTORY_URL',
-    'https://yubo.run/api/gachalog-zc/history',
+    'https://yubo.run/api/zc-flight/gachalog/history',
 )
 move_gacha_log_api_url = os.getenv(
     'ZCFLIGHT_MOVE_GACHA_URL',
-    'https://yubo.run/api/gachalog-zc/move-record',
+    'https://yubo.run/api/zc-flight/gachalog/move-record',
 )
 revoke_gacha_log_api_url = os.getenv(
     'ZCFLIGHT_REVOKE_GACHA_URL',
-    'https://yubo.run/api/gachalog-zc/revoke',
+    'https://yubo.run/api/zc-flight/gachalog/revoke',
 )
 restore_gacha_log_api_url = os.getenv(
     'ZCFLIGHT_RESTORE_GACHA_URL',
-    'https://yubo.run/api/gachalog-zc/restore',
+    'https://yubo.run/api/zc-flight/gachalog/restore',
 )
 statistics_page_url = "https://yubo.run/zc/zc-flight-live.html?zcnb=zcnb"
-# submit_gacha_log_api_url = 'http://localhost:11325/gachalog/submit'
+# submit_gacha_log_api_url = 'http://localhost:11325/zc-flight/gachalog/submit'
 
 
 client = httpx.Client(http2=True, timeout=15.0)

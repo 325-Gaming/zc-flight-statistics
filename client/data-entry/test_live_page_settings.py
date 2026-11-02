@@ -49,11 +49,39 @@ class LivePageSettingsTests(unittest.TestCase):
             requests.append(request)
             return httpx.Response(200, json={'status': 'success'})
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            request_live_page(client, 'https://example.test/api/gachalog-zc/set-current-user', 'test-token', 'set-live', live_id='test & value', payload={'name': '活动'})
+            request_live_page(client, 'https://example.test/api/zc-flight/gachalog/set-current-user', 'test-token', 'set-live', live_id='test & value', payload={'name': '活动'})
         request = requests[0]
-        self.assertEqual(request.url.path, '/api/gachalog-zc/set-live')
+        self.assertEqual(request.url.path, '/api/zc-flight/live/set')
         self.assertEqual(request.url.params['live_id'], 'test & value')
         self.assertEqual(json.loads(request.content), {'name': '活动'})
+
+    def test_management_routes_preserve_proxy_prefix_across_namespaces(self):
+        routes = {
+            'get-activity-list': 'activity/get-list',
+            'get-live-list': 'live/get-list',
+            'create-live': 'live/create',
+            'set-live': 'live/set',
+            'set-live-editor': 'live/set-editor',
+            'remove-live': 'live/remove',
+            'set-default-live': 'live/set-default',
+        }
+        for action, path in routes.items():
+            with self.subTest(action=action):
+                requests = []
+                def handler(request):
+                    requests.append(request)
+                    return httpx.Response(200, json={
+                        'status': 'success', 'activity_list': [], 'live_list': [],
+                        'operator_id': 1, 'is_admin': False, 'default_live_id': '',
+                    })
+                with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+                    request_live_page(
+                        client, 'https://example.test/proxy/api/zc-flight/gachalog/set-current-user',
+                        'test-token', action,
+                        payload=None if action.startswith('get-') else {},
+                    )
+                self.assertEqual(requests[0].url.path, '/proxy/api/zc-flight/' + path)
+                self.assertEqual(requests[0].method, 'GET' if action.startswith('get-') else 'POST')
 
     def test_upstream_errors_are_not_replaced_by_empty_lists(self):
         with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as client:

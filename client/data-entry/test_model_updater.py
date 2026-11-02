@@ -40,7 +40,7 @@ class ModelUpdaterTests(unittest.TestCase):
                 "schema_version": 1, "models": old_models,
             }), encoding="utf-8")
             results = update_models(
-                "https://example.test/api/gachalog-zc/get-model-manifest",
+                "https://example.test/api/zc-flight/model/get-manifest",
                 models_dir, "1.0.0", login_token="test-token", client=client,
             )
             for name in ("image_type", "gacha10"):
@@ -83,20 +83,20 @@ class ModelUpdaterTests(unittest.TestCase):
 
         def handler(request):
             self.assertEqual(request.headers.get("authorization"), "Bearer test-token")
-            if request.url.path == "/api/gachalog-zc/get-model-manifest":
+            if request.url.path == "/api/zc-flight/model/get-manifest":
                 models = {}
                 for name, content in files.items():
                     models[name] = {
                         "version": versions[name],
                         "sha256": hashlib.sha256(content).hexdigest(),
                         "size": len(content),
-                        "url": f"/api/gachalog-zc/download-model?model_name={name}&version={versions[name]}",
+                        "url": f"/api/zc-flight/model/download?model_name={name}&version={versions[name]}",
                         "min_client_version": "0.2.0",
                     }
                 return httpx.Response(
                     200, json={"schema_version": 1, "models": models}
                 )
-            self.assertEqual(request.url.path, "/api/gachalog-zc/download-model")
+            self.assertEqual(request.url.path, "/api/zc-flight/model/download")
             name = request.url.params["model_name"]
             self.assertEqual(request.url.params["version"], versions[name])
             content = b"corrupt" if corrupt_download else files[name]
@@ -113,7 +113,7 @@ class ModelUpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, self._client(files) as client:
             models_dir = pathlib.Path(temp_dir)
             results = update_models(
-                "https://example.test/api/gachalog-zc/get-model-manifest",
+                "https://example.test/api/zc-flight/model/get-manifest",
                 models_dir,
                 "0.2.0",
                 login_token="test-token",
@@ -159,13 +159,13 @@ class ModelUpdaterTests(unittest.TestCase):
                 (models_dir / filename).write_bytes(files[name])
             with httpx.Client(transport=httpx.MockTransport(handler)) as client:
                 results = update_models(
-                    "https://example.test/api/gachalog-zc/get-model-manifest",
+                    "https://example.test/api/zc-flight/model/get-manifest",
                     models_dir,
                     "0.2.0",
                     client=client,
                 )
 
-            self.assertEqual(requests, ["/api/gachalog-zc/get-model-manifest"])
+            self.assertEqual(requests, ["/api/zc-flight/model/get-manifest"])
             self.assertTrue(all(result.status == "current" for result in results.values()))
 
     def test_bad_download_does_not_replace_existing_model(self):
@@ -183,7 +183,7 @@ class ModelUpdaterTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 update_models(
-                    "https://example.test/api/gachalog-zc/get-model-manifest",
+                    "https://example.test/api/zc-flight/model/get-manifest",
                     models_dir,
                     "0.2.0",
                     login_token="test-token",
@@ -205,7 +205,7 @@ class ModelUpdaterTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "干员类别表存在重复项"):
                 update_models(
-                    "https://example.test/api/gachalog-zc/get-model-manifest",
+                    "https://example.test/api/zc-flight/model/get-manifest",
                     models_dir,
                     "0.2.0",
                     login_token="test-token",
