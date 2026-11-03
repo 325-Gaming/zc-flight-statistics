@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from urllib.parse import urljoin
 
 from flight_session import auth_headers
+from live_page_settings import valid_user_id
 
 
 @dataclass(frozen=True)
@@ -9,7 +10,7 @@ class GachaHistoryRecord:
     record_id: int
     event_name: str
     activity_id: str
-    operator_id: int
+    operator_user_id: str
     pool_name: str
     nickname: str
     sequence_no: int
@@ -22,6 +23,8 @@ class GachaHistoryRecord:
 
     @classmethod
     def from_payload(cls, payload):
+        if not valid_user_id(payload.get("operator_user_id")):
+            raise ValueError("历史记录中的操作员QQ号无效")
         character_list = payload.get("character_list")
         if not isinstance(character_list, list) or any(
             not isinstance(character, str) for character in character_list
@@ -35,7 +38,7 @@ class GachaHistoryRecord:
             record_id=int(payload["record_id"]),
             event_name=str(payload["event_name"]),
             activity_id=str(payload["activity_id"]),
-            operator_id=int(payload["operator_id"]),
+            operator_user_id=payload["operator_user_id"],
             pool_name=str(payload["pool_name"]),
             nickname=str(payload["nickname"]),
             sequence_no=int(payload["sequence_no"]),

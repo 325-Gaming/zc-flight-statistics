@@ -60,7 +60,7 @@ class RecordExtensionsTests(unittest.TestCase):
     def test_history_gift_occupies_record_sequence_but_not_actual_pulls(self):
         self.app.history_filter, self.app.history_nickname = 'current', None
         self.app.history_pending, self.app.history_status = False, ''
-        records = [GachaHistoryRecord(i, '活动-pool', 'activity', 1, 'pool', '甲', i,
+        records = [GachaHistoryRecord(i, '活动-pool', 'activity', '10001', 'pool', '甲', i,
             count, tuple(names), '2026-11-01T12:00:00', False, None, gift)
             for i, count, names, gift in [(1, 10, ['三星干员']*10, False), (2, 0, ['限定'], True), (3, 1, ['三星干员'], False)]]
         self.module.core.client, self.module.core.gacha_history_api_url, self.module.core.login_token = object(), 'test', 'token'

@@ -42,6 +42,8 @@ class WebViewProfileTests(unittest.TestCase):
         })
         info["nickname"] = "bilibili_nickname"
         self.assertEqual(module._captain_profile(info)["nickname"], "哔哩昵称")
+        info["nickname"] = "unknown_nickname_source"
+        self.assertEqual(module._captain_profile(info)["nickname"], "")
         info["nickname"] = "null"
         self.assertEqual(module._captain_profile(info)["nickname"], "")
         info["nickname"] = "arknights_nickname"

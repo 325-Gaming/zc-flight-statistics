@@ -25,7 +25,7 @@ class LivePageSettingsTests(unittest.TestCase):
         module.core.event_name = '活动'
         module.core.pool_name = '当前卡池'
         with patch.object(module, 'request_live_page', return_value={
-            'live_list': [], 'operator_id': 1, 'is_admin': False,
+            'live_list': [], 'user_id': '10001', 'is_admin': False,
             'default_live_id': '',
         }), patch.object(module, 'get_page_pool_settings', return_value={
             'pool_name_list': ('新卡池', '当前卡池'),
@@ -71,7 +71,7 @@ class LivePageSettingsTests(unittest.TestCase):
                     requests.append(request)
                     return httpx.Response(200, json={
                         'status': 'success', 'activity_list': [], 'live_list': [],
-                        'operator_id': 1, 'is_admin': False, 'default_live_id': '',
+                        'user_id': '10001', 'is_admin': False, 'default_live_id': '',
                     })
                 with httpx.Client(transport=httpx.MockTransport(handler)) as client:
                     request_live_page(
@@ -115,6 +115,29 @@ class LivePageSettingsTests(unittest.TestCase):
                     client, 'https://example.test/set-current-user', 'test-token',
                     'get-activity-list',
                 )
+
+    def test_account_contract_rejects_numeric_and_legacy_ids(self):
+        row = {'live_id': 'live', 'name': '直播', 'activity_id': 'activity',
+               'event_name': '活动', 'pool_name': '卡池', 'owner_user_id': '10001',
+               'follow_user_id': '9007199254740993', 'editor_user_id_list': ['10002'],
+               'fixed_nickname': None, 'is_enabled': True}
+        valid = {'live_list': [row], 'user_id': '10001', 'is_admin': False, 'default_live_id': ''}
+        cases = [valid, {**valid, 'user_id': 10001},
+                 {**valid, 'live_list': [{**row, 'follow_user_id': 10002}]},
+                 {**valid, 'live_list': [{**row, 'editor_user_id_list': [2]}]},
+                 {'live_list': [], 'operator_id': 1, 'is_admin': False, 'default_live_id': ''}]
+        for index, data in enumerate(cases):
+            with httpx.Client(transport=httpx.MockTransport(
+                lambda _, data=data: httpx.Response(200, json=data)
+            )) as client:
+                if index == 0:
+                    result = request_live_page(client, 'https://example.test/set-current-user',
+                                               'token', 'get-live-list')
+                    self.assertEqual(result['live_list'][0]['follow_user_id'], '9007199254740993')
+                else:
+                    with self.assertRaises(ValueError):
+                        request_live_page(client, 'https://example.test/set-current-user',
+                                          'token', 'get-live-list')
 
     def test_select_persists_live_id_and_protects_open_settings_window(self):
         module = WebViewProfileTests._load_app_module()

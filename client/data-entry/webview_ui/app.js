@@ -501,13 +501,13 @@ function renderStatistics(previewLiveId = state.live_id) {
       <label for="live-name">配置名称</label><input id="live-name" required maxlength="128">
       <label for="live-activity">航空活动</label><select id="live-activity" required>${activityOptions}</select>
       <label for="live-pool">卡池名称</label><select id="live-pool" required>${poolOptions}</select>
-      <label for="live-follow">跟随操作员账号编号</label><input id="live-follow" type="number" required min="1" step="1">
+      <label for="live-follow">跟随操作员QQ号</label><input id="live-follow" type="text" inputmode="numeric" required pattern="[0-9]{5,16}">
       <label for="live-passenger">固定乘客</label><input id="live-passenger" maxlength="64" placeholder="留空则跟随指定操作员当前选择的乘客">
       <label class="check-row wide"><input id="live-enabled" type="checkbox" checked>启用直播配置</label>
     </form>
-    <p class="muted">你的操作员账号编号：${data.operator_id}。直播统计只读取配置指定操作员在所选活动和卡池中上传的记录。</p>
+    <p class="muted">你的QQ号：${data.user_id}。直播统计只读取配置指定操作员在所选活动和卡池中上传的记录。</p>
     <div class="actions"><button id="live-create">创建独立配置</button><button id="live-save">保存所选配置</button><button id="live-remove">移除所选配置</button></div>
-    <div class="form-grid"><label for="live-editors">授权操作员账号编号</label><input id="live-editors" placeholder="以英文逗号分隔；留空移除全部授权"></div>
+    <div class="form-grid"><label for="live-editors">授权操作员QQ号</label><input id="live-editors" placeholder="以英文逗号分隔；留空移除全部授权"></div>
     <div class="actions"><button id="live-grant">保存授权（仅创建者）</button></div>
     <p class="muted">选择配置并点击“用于本客户端”后，“直播页面设置”和 ON AIR 会操作该配置。新配置独立初始化，ON AIR 默认关闭，之后各配置独立保存。</p>
   </div>`;
@@ -523,17 +523,17 @@ function renderStatistics(previewLiveId = state.live_id) {
     urlInput.value = url.href;
     copyButton.textContent = '点击复制';
     const row = data.live_list.find(item => item.live_id === select.value);
-    const values = row || {name: data.event_name, activity_id: data.activity_id, pool_name: data.pool_name, follow_operator_id: data.operator_id, fixed_nickname: '', is_enabled: true};
-    for (const [field, key] of [['name', 'name'], ['activity', 'activity_id'], ['pool', 'pool_name'], ['follow', 'follow_operator_id'], ['passenger', 'fixed_nickname']]) {
+    const values = row || {name: data.event_name, activity_id: data.activity_id, pool_name: data.pool_name, follow_user_id: data.user_id, fixed_nickname: '', is_enabled: true};
+    for (const [field, key] of [['name', 'name'], ['activity', 'activity_id'], ['pool', 'pool_name'], ['follow', 'follow_user_id'], ['passenger', 'fixed_nickname']]) {
       document.getElementById(`live-${field}`).value = values[key] ?? '';
     }
     document.getElementById('live-enabled').checked = values.is_enabled;
-    document.getElementById('live-editors').value = row ? row.editor_id_list.join(',') : '';
-    const canEdit = row && (row.owner_id === data.operator_id || row.editor_id_list.includes(data.operator_id));
+    document.getElementById('live-editors').value = row ? row.editor_user_id_list.join(',') : '';
+    const canEdit = row && (row.owner_user_id === data.user_id || row.editor_user_id_list.includes(data.user_id));
     document.getElementById('live-save').disabled = !canEdit;
     const activity = row && data.activity_list.find(item => item.activity_id === row.activity_id);
-    document.getElementById('live-remove').disabled = !row || (row.owner_id !== data.operator_id && activity?.role !== 'captain');
-    document.getElementById('live-grant').disabled = !row || row.owner_id !== data.operator_id;
+    document.getElementById('live-remove').disabled = !row || (row.owner_user_id !== data.user_id && activity?.role !== 'captain');
+    document.getElementById('live-grant').disabled = !row || row.owner_user_id !== data.user_id;
     if (defaultButton) {
       defaultButton.textContent = select.value ? '设为默认活动' : '清除默认活动';
       defaultButton.disabled = !select.value && !data.default_live_id;
@@ -577,7 +577,7 @@ function renderStatistics(previewLiveId = state.live_id) {
       name: document.getElementById('live-name').value.trim(),
       activity_id: document.getElementById('live-activity').value,
       pool_name: document.getElementById('live-pool').value.trim(),
-      follow_operator_id: Number(document.getElementById('live-follow').value),
+      follow_user_id: document.getElementById('live-follow').value.trim(),
       fixed_nickname: document.getElementById('live-passenger').value.trim() || null,
       is_enabled: document.getElementById('live-enabled').checked,
     };
@@ -592,11 +592,11 @@ function renderStatistics(previewLiveId = state.live_id) {
   document.getElementById('live-form').onsubmit = event => event.preventDefault();
   document.getElementById('live-grant').onclick = async () => {
     const text = document.getElementById('live-editors').value.trim();
-    if (text && !/^[1-9][0-9]*(\s*,\s*[1-9][0-9]*)*$/.test(text)) {
-      await showDialog('无法授权', '请填写正整数账号编号，并使用英文逗号分隔。');
+    if (text && !/^[0-9]{5,16}(\s*,\s*[0-9]{5,16})*$/.test(text)) {
+      await showDialog('无法授权', '请填写5至16位QQ号，并使用英文逗号分隔。');
       return;
     }
-    return perform('editors', {live_id: select.value, values: {editor_id_list: text ? text.split(',').map(Number) : []}});
+    return perform('editors', {live_id: select.value, values: {editor_user_id_list: text ? text.split(',').map(value => value.trim()) : []}});
   };
 }
 

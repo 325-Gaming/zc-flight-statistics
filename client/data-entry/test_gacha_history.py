@@ -13,6 +13,12 @@ ACTIVITY_ID = "11111111-1111-1111-1111-111111111111"
 
 
 class GachaHistoryTests(unittest.TestCase):
+    def test_history_does_not_accept_internal_or_numeric_account_ids(self):
+        for payload in ({'operator_id': 1}, {'operator_user_id': 10001},
+                        {'operator_user_id': '1'}, {'operator_user_id': 'source_selector'}):
+            with self.assertRaisesRegex(ValueError, '操作员QQ号无效'):
+                GachaHistoryRecord.from_payload(payload)
+
     def test_formats_single_and_ten_pull_positions(self):
         self.assertEqual(format_gacha_position(1, 1), "1")
         self.assertEqual(format_gacha_position(1, 10), "1~10")
@@ -24,7 +30,7 @@ class GachaHistoryTests(unittest.TestCase):
                 record_id=record_id,
                 event_name="event",
                 activity_id=ACTIVITY_ID,
-                operator_id=1,
+                operator_user_id="10001",
                 pool_name="pool",
                 nickname=nickname,
                 sequence_no=sequence_no,
@@ -62,7 +68,7 @@ class GachaHistoryTests(unittest.TestCase):
                             "record_id": 7,
                             "event_name": "event",
                             "activity_id": ACTIVITY_ID,
-                            "operator_id": 1,
+                            "operator_user_id": "10001",
                             "pool_name": "pool",
                             "nickname": "user",
                             "sequence_no": 3,
