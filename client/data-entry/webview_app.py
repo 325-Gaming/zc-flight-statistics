@@ -699,13 +699,12 @@ class WebViewApp:
         )
         selected_pool = select_initial_pool_name(
             str(config.get("pool_name", "")).strip(),
-            pool["current_pool_name"], pool["pool_name_list"],
+            pool["pool_name_list"],
         )
         return {
             "config": config,
             "activities": list(self.activity_list),
             "pool_names": pool["pool_name_list"],
-            "current_pool": pool["current_pool_name"],
             "selected_pool": selected_pool,
             "monitors": core.capture.get_monitor_info(),
             "pool_message": "此设置仅改变客户端录入活动，不会切换默认直播活动。",
@@ -725,7 +724,7 @@ class WebViewApp:
             "display_items": PAGE_DISPLAY_ITEMS,
             "text_items": PAGE_TEXT_ITEMS,
             "live_id": settings.get("live_id", ""),
-            "live_name": settings.get("live_name", "旧版默认活动"),
+            "live_name": settings.get("live_name", "默认直播配置"),
         }
 
     def _refresh_main_page_settings(self):

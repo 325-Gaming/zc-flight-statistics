@@ -46,9 +46,8 @@ from page_display_settings import (
 )
 from page_pool_settings import (
     get_page_pool_settings,
-    get_pool_sync_message,
+    get_pool_selection_message,
     select_initial_pool_name,
-    set_current_pool,
 )
 from page_style_settings import (
     DEFAULT_PAGE_STYLE,
@@ -137,10 +136,6 @@ set_current_user_api_url = os.getenv(
 get_pool_list_api_url = os.getenv(
     'ZCFLIGHT_GET_POOL_LIST_URL',
     'https://yubo.run/api/zc-flight/pool/get-list',
-)
-set_current_pool_api_url = os.getenv(
-    'ZCFLIGHT_SET_CURRENT_POOL_URL',
-    'https://yubo.run/api/zc-flight/pool/set-current',
 )
 model_manifest_api_url = os.getenv(
     'ZCFLIGHT_MODEL_MANIFEST_URL',
@@ -1857,7 +1852,6 @@ class SimpleApp:
             return
 
         pool_name_list = pool_settings["pool_name_list"]
-        current_pool_name = pool_settings["current_pool_name"]
         configured_activity_id = str(current_config.get("activity_id", "")).strip()
         activity_by_label = {
             f"{item['name']}（{'机长' if item['role'] == 'captain' else '乘务员'}）": item
@@ -1873,7 +1867,6 @@ class SimpleApp:
         configured_pool_name = str(current_config.get("pool_name", "")).strip()
         selected_pool_name = select_initial_pool_name(
             configured_pool_name,
-            current_pool_name,
             pool_name_list,
         )
 
@@ -2023,15 +2016,14 @@ class SimpleApp:
                 )
             except ValueError:
                 full_event_name = "—"
-            pool_sync_message = get_pool_sync_message(
+            pool_selection_message = get_pool_selection_message(
                 configured_pool_name,
-                current_pool_name,
                 selected_pool_name,
                 pool_name_list,
             )
             preview_text = f"完整活动名称预览：{full_event_name}"
-            if pool_sync_message:
-                preview_text += f"\n{pool_sync_message}"
+            if pool_selection_message:
+                preview_text += f"\n{pool_selection_message}"
             event_preview_variable.set(preview_text)
 
         activity_variable.trace_add("write", update_event_preview)
@@ -2069,7 +2061,6 @@ class SimpleApp:
             command=lambda: self.save_settings(
                 entries,
                 window,
-                current_pool_name,
                 activity_by_label,
             ),
         ).pack(side=tk.LEFT)
@@ -2151,7 +2142,7 @@ class SimpleApp:
         preview_label.pack(padx=12, pady=12)
         preview_window.transient(parent)
 
-    def save_settings(self, entries, window, current_pool_name, activity_by_label):
+    def save_settings(self, entries, window, activity_by_label):
         global activity_id
         global event_name
         global hotkey_3x
@@ -2274,45 +2265,13 @@ class SimpleApp:
             return
 
         try:
-            set_current_pool(
-                client,
-                set_current_pool_api_url,
-                login_token,
-                values["pool_name"],
-            )
-        except (httpx.HTTPError, ValueError) as error:
-            if temporary_config_path.exists():
-                temporary_config_path.unlink()
-            if new_listener is not None:
-                new_listener.stop()
-            messagebox.showerror(
-                "保存失败",
-                f"更新服务器直播页当前卡池失败：\n{error}",
-                parent=window,
-            )
-            return
-
-        try:
             temporary_config_path.replace(CONFIG_PATH)
         except OSError as error:
-            rollback_error = None
-            if current_pool_name != values["pool_name"]:
-                try:
-                    set_current_pool(
-                        client,
-                        set_current_pool_api_url,
-                        login_token,
-                        current_pool_name,
-                    )
-                except (httpx.HTTPError, ValueError) as caught_error:
-                    rollback_error = caught_error
             if temporary_config_path.exists():
                 temporary_config_path.unlink()
             if new_listener is not None:
                 new_listener.stop()
             detail = f"无法更新 config.json：\n{error}"
-            if rollback_error is not None:
-                detail += f"\n回滚服务器当前卡池也失败：\n{rollback_error}"
             messagebox.showerror("保存失败", detail, parent=window)
             return
 

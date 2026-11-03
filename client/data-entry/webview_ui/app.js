@@ -452,7 +452,7 @@ function renderPage() {
     <input type="checkbox" id="page-${key}" ${s[key] ? 'checked' : ''}>${escapeHtml(label)}</label>`;
   const fields = data.text_items.map(([key, label]) =>
     `<label for="page-${key}">${escapeHtml(label)}</label><input id="page-${key}" value="${escapeHtml(s[key])}">`).join('');
-  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><p class="muted">正在编辑：${escapeHtml(`${data.live_name}(${data.live_id || '旧版默认'})`)}</p><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
+  appElement.innerHTML = `<div class="form-view"><div class="form-view-content"><p class="muted">正在编辑：${escapeHtml(`${data.live_name}(${data.live_id || '未配置'})`)}</p><label class="check-row"><input type="checkbox" id="page-is_active" ${s.is_active ? 'checked' : ''}>
     ${escapeHtml(data.activity[1])}</label><div class="form-grid">
     <label for="page-poll_interval_seconds">数据轮询间隔（秒）</label>
     <input type="number" id="page-poll_interval_seconds" min="1" max="60" value="${s.poll_interval_seconds}">
@@ -509,7 +509,7 @@ function renderStatistics(previewLiveId = state.live_id) {
     <div class="actions"><button id="live-create">创建独立配置</button><button id="live-save">保存所选配置</button><button id="live-remove">移除所选配置</button></div>
     <div class="form-grid"><label for="live-editors">授权操作员账号编号</label><input id="live-editors" placeholder="以英文逗号分隔；留空移除全部授权"></div>
     <div class="actions"><button id="live-grant">保存授权（仅创建者）</button></div>
-    <p class="muted">选择配置并点击“用于本客户端”后，“直播页面设置”和 ON AIR 会操作该配置。创建新配置时复制当前全局显示设置，之后各配置独立保存。</p>
+    <p class="muted">选择配置并点击“用于本客户端”后，“直播页面设置”和 ON AIR 会操作该配置。新配置独立初始化，ON AIR 默认关闭，之后各配置独立保存。</p>
   </div>`;
   const select = document.getElementById('statistics-live-id');
   const urlInput = document.getElementById('statistics-url');

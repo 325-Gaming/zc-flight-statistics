@@ -226,7 +226,6 @@ ZCFLIGHT_LOGOUT_URL=http://localhost:8000/api/kusa/logout
 ZCFLIGHT_MODEL_MANIFEST_URL=http://localhost:8000/api/zc-flight/model/get-manifest
 ZCFLIGHT_CURRENT_USER_URL=http://localhost:8000/api/zc-flight/gachalog/set-current-user
 ZCFLIGHT_GET_POOL_LIST_URL=http://localhost:8000/api/zc-flight/pool/get-list
-ZCFLIGHT_SET_CURRENT_POOL_URL=http://localhost:8000/api/zc-flight/pool/set-current
 ZCFLIGHT_GET_PAGE_DISPLAY_URL=http://localhost:8000/api/zc-flight/live/get-page-display
 ZCFLIGHT_SET_PAGE_DISPLAY_URL=http://localhost:8000/api/zc-flight/live/set-page-display
 ZCFLIGHT_GET_PAGE_STYLE_LIST_URL=http://localhost:8000/api/zc-flight/live/get-page-style-list
@@ -291,7 +290,7 @@ python3 client/data-entry/webview_app.py
 
 切换默认活动的操作要求全局 `superadmin` 权限；由于客户端登录门禁还要求至少一个当前有效的 `zc_flight_captain` 或 `zc_flight_crew` 活动作用域，实际在此界面操作的管理员需要同时满足这两项条件。选择具体直播配置时按钮显示“设为默认活动”；选择“默认活动（随服务端切换）”时按钮显示“清除默认活动”，当前本来就没有默认配置时按钮禁用。
 
-清除默认活动后，不带 `live_id` 的旧 OBS 链接会回退到旧版全局配置：活动名称固定为 `Zc航空`，卡池读取服务端 `zc_flight_current_pool_name`，并按旧 `event_name` 查询，而不是按独立配置的活动 UUID、操作员和卡池隔离。带有明确 `live_id` 的链接不受默认活动切换或清除影响。旧 Tk 排查界面不提供独立配置管理，请使用 WebView 入口。
+清除默认活动后，不带 `live_id` 的 OBS 链接会返回 503，表示尚未设置默认直播配置，不再回退旧全局入口。带有明确 `live_id` 的链接不受默认活动切换或清除影响。旧 Tk 排查界面不提供独立配置管理，请使用 WebView 入口。
 
 升级必须按服务端迁移说明先创建真实活动并确认 UUID，再迁移旧权限、抽卡记录和直播配置，最后更新 gachabot 与客户端。管理接口沿用 `ZCFLIGHT_CURRENT_USER_URL` 的域名和路径前缀；配置选择立即生效，不需要重启客户端。Windows WebView2、macOS WebView 和 OBS 中的实际复制与展示仍需实机验收。
 
@@ -386,3 +385,7 @@ Windows 默认显示识别结果悬浮窗口，已有开关状态保持不变。
 升级顺序：已有数据库先核对活动作用域与赠送迁移是否完成，再按 gachabot 的 `migrations/20261103_zc_flight_gacha_log_rename.md` 完成表与索引重命名，之后协调部署服务端、代理、直播页和客户端。赠送迁移新增 `is_gift` 列，重命名迁移保留现有数据；已完成的迁移不要重复执行。新客户端依赖 `/zc-flight/gachalog/get-passenger-state` 等新路径。
 
 本轮仅提交源码，暂不发布 data-entry 新版本；版本号保留 `2.5.0`，最低支持版本不变，不创建发布标签。已发布客户端仍调用旧 API，因此本轮提交不代表可以直接切换生产服务端或代理；应等待兼容客户端就绪，或先明确旧路径兼容方案，再安排上线。
+
+### Zc航空全局配置迁移
+
+服务端全局配置使用 `t_zc_flight_setting` 单行存储默认直播 ID、模型清单和开播通知凭据；升级需先执行 gachabot 仓库的 `migrations/20261103_zc_flight_setting.sql` 并同步部署 kusabot，具体步骤见 [部署说明](server/deployment.md)。旧全局直播入口和全局卡池写接口已移除；空 `live_id` 使用默认直播，未配置默认直播时明确报错。录入卡池仅修改客户端配置，直播卡池在直播配置中管理。新建直播不继承旧全局设置，ON AIR 默认关闭。

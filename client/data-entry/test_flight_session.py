@@ -113,11 +113,11 @@ class FlightSessionTests(unittest.TestCase):
             self.assertEqual(request.headers['authorization'], 'Bearer secret')
             self.assertEqual(request.headers['x-zc-flight-identifier'], '12345')
             return httpx.Response(200, json={
-                'current_pool_name': 'pool', 'pool_name_list': ['pool'],
+                'pool_name_list': ['pool'],
             })
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             self.assertEqual(get_page_pool_settings(client, 'https://example.test/pool', session)[
-                'current_pool_name'], 'pool')
+                'pool_name_list'], ('pool',))
 
     def test_logout_network_failure_still_clears_local_session(self):
         session = SessionCredentials('12345', 'secret', time.time())

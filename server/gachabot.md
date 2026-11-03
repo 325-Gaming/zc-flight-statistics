@@ -38,14 +38,13 @@ gachabot 是 NoneBot 插件，通过宿主提供 HTTP 接口，使用 MySQL 保�
 | POST | `/zc-flight/live/set-default` | 全局管理员设置默认配置 |
 | GET | `/zc-flight/live/get-page-display` | 读取指定或默认配置的显示设置 |
 | POST | `/zc-flight/live/set-page-display` | 保存显示设置，支持检查读取时的配置 ID |
-| POST | `/zc-flight/pool/set-current` | 全局管理员修改旧默认入口的卡池 |
 | GET | `/zc-flight/live/get-page-style-list` | 公开获取可用主题名称 |
 | GET | `/zc-flight/gachalog/get` | 公开获取直播统计 |
 | GET | `/zc-flight/gachalog/get-full` | 公开获取完整统计 |
 
 `live_id` 只选择直播配置。配置决定活动、卡池、跟随操作员，以及可选的固定乘客；统计不会合并其他操作员记录。当前乘客按操作员、活动和卡池隔离，多份配置跟随同一组合时会读取同一当前乘客。
 
-未提供或留空 `live_id` 时使用默认入口；非空但不存在或停用的 ID 返回 404，不回退至其他配置。显示设置读取会回显实际配置 ID，保存时的 `expected_live_id` 用于发现编辑期间默认选择变化，冲突时返回 409。
+未提供或留空 `live_id` 时使用配置表指定的默认直播；未设置默认直播返回 503，不再支持旧全局入口；非空但不存在或停用的 ID 返回 404，不回退至其他配置。显示设置读取会回显实际配置 ID，保存时的 `expected_live_id` 用于发现编辑期间默认选择变化，冲突时返回 409。
 
 显示设置包括 ON AIR 活跃刷新、1–60 秒轮询间隔、主题、记分板、底栏各区域、滚动条和底栏文案。权限边界见[认证与活动权限](auth-and-activity.md)。
 
@@ -56,7 +55,7 @@ gachabot 是 NoneBot 插件，通过宿主提供 HTTP 接口，使用 MySQL 保�
 | GET | `/zc-flight/model/get-manifest` | 获取需要认证的模型清单 |
 | GET | `/zc-flight/model/download` | 按模型名称和版本下载需要认证的文件 |
 
-服务端从元数据读取模型清单，并检查文件存在性与大小。清单包含 schema 版本，以及各资源的版本、SHA-256、大小、下载地址和最低客户端版本要求。客户端解析相对下载地址并携带认证信息，下载后校验大小与 SHA-256，再替换本地资源。
+服务端从 `t_zc_flight_setting.model_manifest` 读取模型清单，并检查文件存在性与大小。清单包含 schema 版本，以及各资源的版本、SHA-256、大小、下载地址和最低客户端版本要求。客户端解析相对下载地址并携带认证信息，下载后校验大小与 SHA-256，再替换本地资源。
 
 资源包括画面分类模型、十连干员模型和与其配套的有序干员类别表。训练、导出和类别顺序由训练项目负责；gachabot 负责分发，不在客户端临时推导类别顺序。服务端模型文件与清单必须配套发布。
 
@@ -70,6 +69,6 @@ gachabot 是 NoneBot 插件，通过宿主提供 HTTP 接口，使用 MySQL 保�
 | `t_zc_flight_live` | 直播配置及显示设置 |
 | `t_zc_flight_live_grant` | 直播配置编辑授权 |
 | `t_zc_flight_operator_state` | 操作员在活动和卡池中的当前乘客 |
-| `t_metadata` | 模型清单及相关全局元数据 |
+| `t_zc_flight_setting` | 单行全局配置：默认直播 ID、模型清单和开播通知凭据 |
 
 本表为职责摘要，不作为建表或迁移依据。实际约束及升级步骤以服务端模型和经过审核的迁移文件为准。

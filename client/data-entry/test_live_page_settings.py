@@ -28,7 +28,6 @@ class LivePageSettingsTests(unittest.TestCase):
             'live_list': [], 'operator_id': 1, 'is_admin': False,
             'default_live_id': '',
         }), patch.object(module, 'get_page_pool_settings', return_value={
-            'current_pool_name': '当前卡池',
             'pool_name_list': ('新卡池', '当前卡池'),
         }) as get_pool_list:
             state = app._statistics_state()
